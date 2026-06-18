@@ -27,6 +27,9 @@ final class ProductInput implements Arrayable
     /** @var list<array<string,mixed>> */
     private array $metafields = [];
 
+    /** @var list<ProductField> fields carrying translations to register after save */
+    private array $translatableFields = [];
+
     /**
      * Title is required to create a product, optional when updating; pass null
      * to build an update that doesn't change it.
@@ -120,7 +123,49 @@ final class ProductInput implements Arrayable
     }
 
     /**
-     * Escape hatch for any input field not modelled above (e.g. `seo`, `giftCard`).
+     * Attach a translatable {@see ProductField}: its base value populates this
+     * input, and any translations on it are registered automatically once the
+     * product is saved (by {@see \Baldie81\ShopifyGraphQL\Resource\Products::create()}
+     * / `update()`). This is how you set a field and its translations together,
+     * before you have a product id.
+     */
+    public function field(ProductField $field): self
+    {
+        if ($field->value() !== null) {
+            $this->setInput($field->inputKey(), $field->value());
+        }
+        if ($field->translations() !== []) {
+            $this->translatableFields[] = $field;
+        }
+
+        return $this;
+    }
+
+    /**
+     * @param list<ProductField> $fields
+     */
+    public function fields(array $fields): self
+    {
+        foreach ($fields as $field) {
+            $this->field($field);
+        }
+
+        return $this;
+    }
+
+    /**
+     * The attached fields that carry translations (consumed by the resource after
+     * the product is saved).
+     *
+     * @return list<ProductField>
+     */
+    public function translatableFields(): array
+    {
+        return $this->translatableFields;
+    }
+
+    /**
+     * Escape hatch for any input field not modelled above (e.g. `giftCard`).
      */
     public function set(string $field, mixed $value): self
     {
@@ -138,5 +183,22 @@ final class ProductInput implements Arrayable
         }
 
         return $input;
+    }
+
+    /**
+     * Set an input field, supporting dotted keys for nested inputs (`seo.title`).
+     */
+    private function setInput(string $key, mixed $value): void
+    {
+        if (!str_contains($key, '.')) {
+            $this->fields[$key] = $value;
+
+            return;
+        }
+
+        [$outer, $inner] = explode('.', $key, 2);
+        $nested          = is_array($this->fields[$outer] ?? null) ? $this->fields[$outer] : [];
+        $nested[$inner]  = $value;
+        $this->fields[$outer] = $nested;
     }
 }

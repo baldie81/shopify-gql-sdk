@@ -224,6 +224,31 @@ $result = $shopify->products()->setTranslations($productId, [
 // returns { translations, userErrors, skipped }; non-translatable fields land in `skipped`.
 ```
 
+### Translate while creating (no id needed)
+
+You can't translate in the same `productCreate` call — Shopify needs the product to
+exist first (for its GID and content digests). But you can declare a field's base
+value *and* its translations together, attach them to the input, and let `create()`
+(or `update()`) register them for you right after the product is saved:
+
+```php
+use Baldie81\ShopifyGraphQL\Support\ProductInput;
+use Baldie81\ShopifyGraphQL\Support\ProductField;
+
+$result = $shopify->products()->create(
+    ProductInput::make()
+        ->field(ProductField::title('A nice t-shirt')->withTranslation('fr', 'Un beau t-shirt'))
+        ->field(ProductField::description('<p>Soft cotton</p>')->withTranslation('fr', '<p>Coton doux</p>'))
+        ->vendor('Acme')->status(ProductStatus::Active)   // non-translatable fields as usual
+);
+// $result['product']  — the created product
+// $result['translations'] — the registered translations (present when fields carried any)
+```
+
+Under the hood that's `productCreate` → look up digests → `translationsRegister`, but
+it reads as one call. The base values populate the create input; the translations are
+registered against the new product id.
+
 Metafields are translatable too (when publicly accessible) — they're just another
 resource, addressed by the **metafield's** GID with the key `value`:
 

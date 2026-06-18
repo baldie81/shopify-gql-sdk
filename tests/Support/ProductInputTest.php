@@ -8,6 +8,7 @@ use Baldie81\ShopifyGraphQL\Enum\MetafieldType;
 use Baldie81\ShopifyGraphQL\Enum\ProductStatus;
 use Baldie81\ShopifyGraphQL\Support\Arrayable;
 use Baldie81\ShopifyGraphQL\Support\Metafield;
+use Baldie81\ShopifyGraphQL\Support\ProductField;
 use Baldie81\ShopifyGraphQL\Support\ProductInput;
 use PHPUnit\Framework\TestCase;
 
@@ -55,6 +56,25 @@ final class ProductInputTest extends TestCase
             ['title' => 'X', 'giftCard' => true],
             ProductInput::make('X')->set('giftCard', true)->toArray(),
         );
+    }
+
+    public function testFieldSetsBaseValuesIncludingNestedSeoAndStashesTranslations(): void
+    {
+        $input = ProductInput::make()
+            ->field(ProductField::title('Hat')->withTranslation('fr', 'Chapeau'))
+            ->field(ProductField::description('<p>en</p>'))
+            ->field(ProductField::seoTitle('SEO Title'));
+
+        self::assertSame([
+            'title'           => 'Hat',
+            'descriptionHtml' => '<p>en</p>',
+            'seo'             => ['title' => 'SEO Title'],
+        ], $input->toArray());
+
+        // only the title field carries a translation, so only it is stashed
+        $stashed = $input->translatableFields();
+        self::assertCount(1, $stashed);
+        self::assertSame('title', $stashed[0]->key());
     }
 
     public function testCarriesInlineMetafields(): void

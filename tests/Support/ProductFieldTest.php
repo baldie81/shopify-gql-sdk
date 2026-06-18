@@ -26,6 +26,17 @@ final class ProductFieldTest extends TestCase
         self::assertSame('custom_key', ProductField::of('custom_key')->key());
     }
 
+    public function testCarriesBaseValueAndInputKey(): void
+    {
+        $field = ProductField::description('<p>en</p>')->withTranslation('fr', '<p>fr</p>');
+
+        self::assertSame('<p>en</p>', $field->value());
+        self::assertSame('descriptionHtml', $field->inputKey()); // GraphQL input key
+        self::assertSame('body_html', $field->key());            // translation key
+        self::assertSame('seo.title', ProductField::seoTitle('X')->inputKey());
+        self::assertNull(ProductField::title()->value());
+    }
+
     public function testWithTranslationAccumulates(): void
     {
         $field = ProductField::title()

@@ -96,9 +96,10 @@ final class Products extends AbstractResource
             . ' productCreate(product: $product) {'
             . ' product { ' . self::FIELDS . ' } userErrors { field message } } }';
 
-        $data = $this->gql->execute($mutation, ['product' => $this->payload($input)]);
+        $data   = $this->gql->execute($mutation, ['product' => $this->payload($input)]);
+        $result = $data['productCreate'] ?? ['product' => null, 'userErrors' => []];
 
-        return $data['productCreate'] ?? ['product' => null, 'userErrors' => []];
+        return $this->applyAttachedTranslations($input, $result);
     }
 
     /**
@@ -106,7 +107,8 @@ final class Products extends AbstractResource
      * `ProductUpdateInput`, so the builder/array carries only the changed fields.
      *
      * @param ProductInput|array<string,mixed> $input
-     * @return array{product:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     * @return array{
+     *     product:?array<string,mixed>,userErrors:list<array<string,mixed>>}
      */
     public function update(string $id, ProductInput|array $input): array
     {
@@ -116,8 +118,40 @@ final class Products extends AbstractResource
 
         $product = ['id' => Gid::product($id)] + $this->payload($input);
         $data    = $this->gql->execute($mutation, ['product' => $product]);
+        $result  = $data['productUpdate'] ?? ['product' => null, 'userErrors' => []];
 
-        return $data['productUpdate'] ?? ['product' => null, 'userErrors' => []];
+        return $this->applyAttachedTranslations($input, $result, Gid::product($id));
+    }
+
+    /**
+     * If the input carried translatable {@see ProductField}s, register their
+     * translations against the saved product and attach the result. Translations
+     * can't ride in the create/update mutation itself, so this is the
+     * second hop — done for you so a localized create reads as one call.
+     *
+     * @param ProductInput|array<string,mixed> $input
+     * @param array<string,mixed>              $result
+     * @return array<string,mixed>
+     */
+    private function applyAttachedTranslations(ProductInput|array $input, array $result, ?string $fallbackId = null): array
+    {
+        if (!$input instanceof ProductInput) {
+            return $result;
+        }
+
+        $fields = $input->translatableFields();
+        if ($fields === []) {
+            return $result;
+        }
+
+        $productId = $result['product']['id'] ?? $fallbackId;
+        if ($productId === null) {
+            return $result; // nothing saved to translate (e.g. userErrors)
+        }
+
+        $result['translations'] = $this->setTranslations((string) $productId, $fields);
+
+        return $result;
     }
 
     /**

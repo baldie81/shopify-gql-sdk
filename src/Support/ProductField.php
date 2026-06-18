@@ -7,14 +7,17 @@ namespace Baldie81\ShopifyGraphQL\Support;
 use Baldie81\ShopifyGraphQL\Enum\ProductTranslatableField;
 
 /**
- * A translatable product field with its translations attached fluently, for
- * {@see \Baldie81\ShopifyGraphQL\Resource\Products::setTranslations()}.
+ * A translatable product field carrying both its base (default-locale) value and
+ * its translations, fluently:
  *
- * The named constructors hide Shopify's internal keys (e.g. the description is
- * `body_html`), so you work in product terms:
+ *   ProductField::title('A nice t-shirt')->withTranslation('fr', 'Un beau t-shirt');
+ *   ProductField::description('<p>en</p>')->withTranslation('fr', '<p>fr</p>');
  *
- *   ProductField::title()->withTranslation('fr', 'Robe')->withTranslation('es', 'Vestido');
- *   ProductField::description()->withTranslation('fr', '<p>Une robe</p>');
+ * Attach these to a {@see ProductInput} via {@see ProductInput::field()} and the
+ * base values populate the create/update input while the translations are
+ * registered automatically once the product exists. The named constructors map
+ * each field to its GraphQL input key (e.g. `descriptionHtml`) and its Shopify
+ * translation key (e.g. `body_html`), which differ.
  */
 final class ProductField
 {
@@ -22,42 +25,46 @@ final class ProductField
     private array $translations = [];
 
     private function __construct(
-        private readonly string $key,
+        private readonly string $translationKey,
+        private readonly string $inputKey,
+        private readonly ?string $value,
     ) {}
 
-    public static function of(ProductTranslatableField|string $key): self
+    public static function of(ProductTranslatableField|string $key, ?string $value = null): self
     {
-        return new self($key instanceof ProductTranslatableField ? $key->value : $key);
+        $key = $key instanceof ProductTranslatableField ? $key->value : $key;
+
+        return new self($key, $key, $value);
     }
 
-    public static function title(): self
+    public static function title(?string $value = null): self
     {
-        return new self(ProductTranslatableField::Title->value);
+        return new self('title', 'title', $value);
     }
 
-    public static function description(): self
+    public static function description(?string $value = null): self
     {
-        return new self(ProductTranslatableField::Description->value);
+        return new self('body_html', 'descriptionHtml', $value);
     }
 
-    public static function handle(): self
+    public static function handle(?string $value = null): self
     {
-        return new self(ProductTranslatableField::Handle->value);
+        return new self('handle', 'handle', $value);
     }
 
-    public static function productType(): self
+    public static function productType(?string $value = null): self
     {
-        return new self(ProductTranslatableField::ProductType->value);
+        return new self('product_type', 'productType', $value);
     }
 
-    public static function seoTitle(): self
+    public static function seoTitle(?string $value = null): self
     {
-        return new self(ProductTranslatableField::SeoTitle->value);
+        return new self('meta_title', 'seo.title', $value);
     }
 
-    public static function seoDescription(): self
+    public static function seoDescription(?string $value = null): self
     {
-        return new self(ProductTranslatableField::SeoDescription->value);
+        return new self('meta_description', 'seo.description', $value);
     }
 
     /**
@@ -70,9 +77,29 @@ final class ProductField
         return $this;
     }
 
+    /**
+     * The Shopify translation key (e.g. `body_html`).
+     */
     public function key(): string
     {
-        return $this->key;
+        return $this->translationKey;
+    }
+
+    /**
+     * The `ProductInput` field path for the base value (e.g. `descriptionHtml`,
+     * or dotted `seo.title`).
+     */
+    public function inputKey(): string
+    {
+        return $this->inputKey;
+    }
+
+    /**
+     * The base (default-locale) value, if set.
+     */
+    public function value(): ?string
+    {
+        return $this->value;
     }
 
     /**

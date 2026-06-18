@@ -7,6 +7,7 @@ namespace Baldie81\ShopifyGraphQL\Tests\Resource;
 use GuzzleHttp\Psr7\Response;
 use Baldie81\ShopifyGraphQL\Enum\ProductTranslatableField;
 use Baldie81\ShopifyGraphQL\Support\ProductField;
+use Baldie81\ShopifyGraphQL\Support\ProductInput;
 use Baldie81\ShopifyGraphQL\Support\Translation;
 use Baldie81\ShopifyGraphQL\Tests\MockClientTestCase;
 
@@ -150,6 +151,52 @@ final class TranslationsTest extends MockClientTestCase
 
         self::assertSame(['meta_title'], $result['skipped']);
         self::assertCount(1, $this->body(1)['variables']['translations']);
+    }
+
+    public function testCreateRegistersAttachedTranslations(): void
+    {
+        $client = $this->mockClient([
+            new Response(200, [], (string) json_encode(['data' => ['productCreate' => [
+                'product' => ['id' => 'gid://shopify/Product/77'], 'userErrors' => [],
+            ]]])),
+            new Response(200, [], self::content([
+                ['key' => 'title', 'digest' => 'D_T', 'locale' => 'en'],
+                ['key' => 'body_html', 'digest' => 'D_B', 'locale' => 'en'],
+            ])),
+            new Response(200, [], self::registered()),
+        ]);
+
+        $result = $client->products()->create(
+            ProductInput::make()
+                ->field(ProductField::title('Hat')->withTranslation('fr', 'Chapeau'))
+                ->field(ProductField::description('<p>en</p>')->withTranslation('fr', '<p>fr</p>')),
+        );
+
+        self::assertSame('gid://shopify/Product/77', $result['product']['id']);
+        self::assertArrayHasKey('translations', $result);
+        self::assertSame([], $result['translations']['skipped']);
+        self::assertCount(3, $this->history); // productCreate + digests + translationsRegister
+
+        // base values rode in the create input
+        $createVars = $this->body(0)['variables']['product'];
+        self::assertSame('Hat', $createVars['title']);
+        self::assertSame('<p>en</p>', $createVars['descriptionHtml']);
+
+        // translations registered against the new product id, with the right digests
+        self::assertSame('gid://shopify/Product/77', $this->body(2)['variables']['resourceId']);
+        self::assertSame('D_T', $this->body(2)['variables']['translations'][0]['translatableContentDigest']);
+    }
+
+    public function testCreateWithoutAttachedTranslationsIsSingleCall(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['productCreate' => ['product' => ['id' => 'gid://shopify/Product/1'], 'userErrors' => []]],
+        ]))]);
+
+        $result = $client->products()->create(ProductInput::make('Plain'));
+
+        self::assertArrayNotHasKey('translations', $result);
+        self::assertCount(1, $this->history);
     }
 
     public function testRemoveSendsKeysAndLocales(): void
