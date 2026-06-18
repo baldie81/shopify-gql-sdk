@@ -28,6 +28,7 @@ final class Products extends AbstractResource
      */
     private const string FIELDS = <<<'GQL'
         id
+        legacyResourceId
         title
         handle
         status
@@ -107,8 +108,7 @@ final class Products extends AbstractResource
      * `ProductUpdateInput`, so the builder/array carries only the changed fields.
      *
      * @param ProductInput|array<string,mixed> $input
-     * @return array{
-     *     product:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     * @return array{product:?array<string,mixed>,userErrors:list<array<string,mixed>>}
      */
     public function update(string $id, ProductInput|array $input): array
     {
@@ -168,7 +168,7 @@ final class Products extends AbstractResource
         $ownerId  = Gid::product($id);
         $mutation = 'mutation ($metafields: [MetafieldsSetInput!]!) {'
             . ' metafieldsSet(metafields: $metafields) {'
-            . ' metafields { id namespace key type value } userErrors { field message code } } }';
+            . ' metafields { id legacyResourceId namespace key type value createdAt updatedAt } userErrors { field message code } } }';
 
         $inputs = [];
         foreach ($this->payloads($metafields) as $metafield) {
@@ -286,7 +286,7 @@ final class Products extends AbstractResource
      * `skipped` rather than erroring.
      *
      * @param list<ProductField> $fields
-     * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,skipped:list<string>}
+     * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,digests:array<string,string>,skipped:list<string>}
      */
     public function setTranslations(string $id, array $fields, ?string $marketId = null): array
     {
@@ -318,7 +318,9 @@ final class Products extends AbstractResource
             }
         }
 
-        $result            = $inputs === [] ? ['translations' => [], 'userErrors' => []] : $translations->register($gid, $inputs);
+        $result = $inputs === []
+            ? ['translations' => [], 'userErrors' => [], 'digests' => []]
+            : $translations->register($gid, $inputs);
         $result['skipped'] = array_values(array_unique($skipped));
 
         return $result;
@@ -371,7 +373,7 @@ final class Products extends AbstractResource
      * {@see findIdBySku()}.
      *
      * @param list<MediaSlot> $slots
-     * @return array{created:list<string>,replaced:list<string>,orderedIds:list<string>,reorder:array<string,mixed>,userErrors:list<array<string,mixed>>}
+     * @return array{media:list<array{key:string,id:string,action:string}>,created:list<string>,replaced:list<string>,orderedIds:list<string>,reorder:array<string,mixed>,userErrors:list<array<string,mixed>>}
      */
     public function syncMedia(string $id, array $slots): array
     {
@@ -405,6 +407,7 @@ final class Products extends AbstractResource
         $replaced      = [];
         $createInputs  = [];
         $createKeys    = [];
+        $action        = []; // key => 'created' | 'replaced'
         foreach ($slots as $i => $slot) {
             $key    = $slot->key();
             $source = $slot->isLocal() ? $uploaded[$i] : $slot->source();
@@ -412,6 +415,7 @@ final class Products extends AbstractResource
             if (isset($existing[$key]) && $existing[$key] !== '') {
                 $replaceInputs[] = ['id' => $existing[$key], 'originalSource' => $source, 'alt' => $key];
                 $replaced[]      = $key;
+                $action[$key]    = 'replaced';
             } else {
                 $createInputs[] = ['originalSource' => $source, 'mediaContentType' => 'IMAGE', 'alt' => $key];
                 $createKeys[]   = $key;
@@ -440,16 +444,22 @@ final class Products extends AbstractResource
                 if ($newId !== null) {
                     $existing[$key] = (string) $newId;
                     $created[]      = $key;
+                    $action[$key]   = 'created';
                 }
             }
         }
 
         // Final order, in slot position order, using the (now-known) media ids.
+        // `media` pairs each slot key with its media id and the action taken, so
+        // the caller can persist the gid per slot.
         $orderedIds = [];
+        $media      = [];
         foreach ($slots as $slot) {
-            $mediaId = $existing[$slot->key()] ?? null;
+            $key     = $slot->key();
+            $mediaId = $existing[$key] ?? null;
             if ($mediaId !== null && $mediaId !== '') {
                 $orderedIds[] = $mediaId;
+                $media[]      = ['key' => $key, 'id' => $mediaId, 'action' => $action[$key] ?? 'unchanged'];
             }
         }
 
@@ -462,11 +472,12 @@ final class Products extends AbstractResource
         }
 
         return [
-            'created'    => $created,
-            'replaced'   => $replaced,
-            'orderedIds' => $orderedIds,
-            'reorder'    => $reorder,
-            'userErrors' => $userErrors,
+            'media'      => $media,      // list of { key, id (gid), action } in final order
+            'created'    => $created,    // keys created
+            'replaced'   => $replaced,   // keys replaced
+            'orderedIds' => $orderedIds, // media gids in final order
+            'reorder'    => $reorder,    // { job: { id, done }, mediaUserErrors }
+            'userErrors' => $userErrors, // aggregated, for logging
         ];
     }
 

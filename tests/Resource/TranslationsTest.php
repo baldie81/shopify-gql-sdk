@@ -39,6 +39,8 @@ final class TranslationsTest extends MockClientTestCase
         ]);
 
         self::assertSame([], $result['skipped']);
+        // digests used are surfaced for persistence
+        self::assertSame(['title' => 'D_TITLE', 'body_html' => 'D_BODY'], $result['digests']);
         self::assertCount(2, $this->history);
 
         $vars = $this->body(1)['variables'];

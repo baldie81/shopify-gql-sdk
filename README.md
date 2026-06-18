@@ -268,6 +268,30 @@ $shopify->translations()->register($gid, [
 $shopify->translations()->remove($gid, [ProductTranslatableField::Title], ['fr']);
 ```
 
+## Return data (built for persistence)
+
+Every write method returns the identifiers and errors you'd want to store, rather
+than just a success flag:
+
+| Method | Returns |
+|--------|---------|
+| `create()` / `update()` | `product` (incl. `id` GID and `legacyResourceId` numeric id), `userErrors`, and `translations` when fields carried any |
+| `get()` / `search*()` | product nodes with `id` + `legacyResourceId` + timestamps |
+| `setMetafields()` | `metafields` (`id` GID, `legacyResourceId`, `namespace/key/type/value`, timestamps), `userErrors` |
+| `syncMedia()` | `media` (`{ key, id (GID), action }` per slot), `created`/`replaced`, `orderedIds`, `reorder.job`, aggregated `userErrors` |
+| `addMedia()` / `ensureMedia()` | media nodes with `id`, plus `mediaUserErrors` |
+| `setTranslations()` / `translations()->set()/register()` | `translations` (each with `translatableContentDigest`), the `digests` map, `userErrors`, `skipped` |
+| `bulkOperations()` | `bulkOperation` (`id`, `status`, `url`, `objectCount`, …), `userErrors` |
+| `files()->upload()` | the `resourceUrl`; `update()` returns files + `userErrors` |
+
+Notes:
+- **Numeric ids:** products/metafields include `legacyResourceId`; for *any* GID,
+  `Gid::id($gid)` returns the trailing numeric id.
+- **Errors are data, never swallowed:** `userErrors`/`mediaUserErrors` come back on
+  the result for logging (only transport/throttle/HTTP failures throw).
+- **Digests:** persist the per-translation `translatableContentDigest` so you can
+  later detect "outdated" translations or re-register safely.
+
 ## GraphQL specifics (how this differs from a REST SDK)
 
 - **Selection sets.** Reads return a curated default field set (`Products::FIELDS`),

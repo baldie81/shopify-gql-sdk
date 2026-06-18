@@ -78,6 +78,12 @@ final class ProductsSyncMediaTest extends MockClientTestCase
         self::assertSame(['ACME_2.jpg'], $result['created']);
         self::assertSame(['gid://shopify/MediaImage/1', 'gid://shopify/MediaImage/2'], $result['orderedIds']);
         self::assertSame([], $result['userErrors']);
+
+        // the media gid + action is exposed per slot so it can be persisted
+        self::assertSame([
+            ['key' => 'ACME_1.jpg', 'id' => 'gid://shopify/MediaImage/1', 'action' => 'replaced'],
+            ['key' => 'ACME_2.jpg', 'id' => 'gid://shopify/MediaImage/2', 'action' => 'created'],
+        ], $result['media']);
         self::assertCount(4, $this->history);
 
         // replace (fileUpdate) targets the existing media id with the new source

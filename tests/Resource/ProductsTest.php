@@ -29,6 +29,18 @@ final class ProductsTest extends MockClientTestCase
         self::assertSame('gid://shopify/Product/123', $body['variables']['id']);
     }
 
+    public function testSelectionIncludesNumericLegacyResourceId(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['product' => ['id' => 'gid://shopify/Product/123', 'legacyResourceId' => '123']],
+        ]))]);
+
+        $product = $client->products()->get('123');
+
+        self::assertSame('123', $product['legacyResourceId']); // numeric id for the DB
+        self::assertStringContainsString('legacyResourceId', $this->body()['query']);
+    }
+
     public function testGetReturnsNullWhenMissing(): void
     {
         $client = $this->mockClient([new Response(200, [], (string) json_encode(['data' => ['product' => null]]))]);

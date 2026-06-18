@@ -59,7 +59,7 @@ final class Translations extends AbstractResource
      * `skipped` rather than sent (which would error).
      *
      * @param array<string,string> $values key => translated value
-     * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,skipped:list<string>}
+     * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,digests:array<string,string>,skipped:list<string>}
      */
     public function set(string $resourceId, string $locale, array $values, ?string $marketId = null): array
     {
@@ -85,7 +85,9 @@ final class Translations extends AbstractResource
             $inputs[] = $input;
         }
 
-        $result = $inputs === [] ? ['translations' => [], 'userErrors' => []] : $this->runRegister($resourceId, $inputs);
+        $result = $inputs === []
+            ? ['translations' => [], 'userErrors' => [], 'digests' => []]
+            : $this->runRegister($resourceId, $inputs);
         $result['skipped'] = $skipped;
 
         return $result;
@@ -97,7 +99,7 @@ final class Translations extends AbstractResource
      * current content before sending.
      *
      * @param list<Translation|array<string,mixed>> $translations
-     * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>}
+     * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,digests:array<string,string>}
      */
     public function register(string $resourceId, array $translations): array
     {
@@ -153,16 +155,35 @@ final class Translations extends AbstractResource
 
     /**
      * @param list<array<string,mixed>> $inputs
-     * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>}
+     * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,digests:array<string,string>}
      */
     private function runRegister(string $resourceId, array $inputs): array
     {
         $mutation = 'mutation ($resourceId: ID!, $translations: [TranslationInput!]!) {'
             . ' translationsRegister(resourceId: $resourceId, translations: $translations) {'
-            . ' translations { locale key value } userErrors { field message } } }';
+            . ' translations { locale key value updatedAt } userErrors { field message } } }';
 
-        $data = $this->gql->execute($mutation, ['resourceId' => $resourceId, 'translations' => array_values($inputs)]);
+        $data   = $this->gql->execute($mutation, ['resourceId' => $resourceId, 'translations' => array_values($inputs)]);
+        $result = $data['translationsRegister'] ?? ['translations' => [], 'userErrors' => []];
 
-        return $data['translationsRegister'] ?? ['translations' => [], 'userErrors' => []];
+        // Surface the digest each translation was registered against, so callers
+        // can persist it (e.g. to detect "outdated" translations later).
+        $digestByKey = [];
+        foreach ($inputs as $input) {
+            if (isset($input['key'])) {
+                $digestByKey[(string) $input['key']] = (string) ($input['translatableContentDigest'] ?? '');
+            }
+        }
+        foreach ($result['translations'] ?? [] as &$translation) {
+            $key = $translation['key'] ?? null;
+            if ($key !== null && isset($digestByKey[$key])) {
+                $translation['translatableContentDigest'] = $digestByKey[$key];
+            }
+        }
+        unset($translation);
+
+        $result['digests'] = $digestByKey;
+
+        return $result;
     }
 }
