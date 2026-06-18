@@ -16,11 +16,15 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`GraphQL\Client`** — single-endpoint POST transport: encodes `{query, variables}`,
   decodes `{data, errors, extensions}`, normalises errors, and **backs off + retries
   on `THROTTLED`** using Shopify's calculated query-cost block.
-- **`Resource\Products`** — queries/mutations with a lean default selection set.
+- **`Resource\Products`** — queries/mutations with a lean default selection set,
+  plus metafields (`setMetafields`) and idempotent media (`ensureMedia`).
+- **`Resource\BulkOperations`** — run a bulk query/mutation, poll, read the JSONL.
 - **`Support\ProductInput`** — fluent `Arrayable` builder for `ProductCreateInput` /
-  `ProductUpdateInput` (write methods accept `builder|array`).
+  `ProductUpdateInput`, incl. inline metafields (write methods accept `builder|array`).
+- **`Support\Metafield`** — builder for metafields of any type (serialises the value).
+- **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
 - **`Support\Gid`** — global-ID helpers (`gid://shopify/Product/123`).
-- **`Enum\ProductStatus`** — `ACTIVE` / `ARCHIVED` / `DRAFT`.
+- **Enums** — `ProductStatus`, `MetafieldType`, `MediaContentType`, `BulkOperationStatus`.
 - **Exceptions** — `GraphQLException` (top-level errors / non-2xx), `ThrottledException`
   (cost-limit / 429), `TransportException`, under a `ShopifyException` base.
 
@@ -64,6 +68,78 @@ if ($res['userErrors'] !== []) { /* … */ }
 $shopify->products()->update($res['product']['id'], ProductInput::make()->status(ProductStatus::Active));
 ```
 
+## Metafields (all types)
+
+Shopify stores every metafield value as a string; the `Metafield` builder
+serialises by PHP type (bools → `true`/`false`, scalars stringified, arrays/objects
+JSON-encoded — covering `json`, `list.*`, and structured types like `dimension`/
+`weight`/`rating`/`money`). `metafieldsSet` upserts by namespace+key, so this is
+idempotent by construction.
+
+```php
+use Baldie81\ShopifyGraphQL\Support\Metafield;
+use Baldie81\ShopifyGraphQL\Enum\MetafieldType;
+
+$shopify->products()->setMetafields($productId, [
+    Metafield::text('specs', 'material', 'Wool'),
+    Metafield::integer('specs', 'capacity', 25),
+    Metafield::boolean('specs', 'waterproof', true),
+    Metafield::json('specs', 'matrix', ['rows' => 3, 'cols' => 4]),
+    Metafield::make('specs', 'volume', MetafieldType::Volume, ['value' => 1.5, 'unit' => 'LITERS']),
+    Metafield::reference('specs', 'related', 'gid://shopify/Product/9'),
+    Metafield::make('specs', 'anything', 'a_brand_new_type', 'raw value'), // raw type string
+]);
+// returns { metafields, userErrors }; chunked to Shopify's 25-per-call limit.
+```
+
+Metafields can also ride along with a create/update via `ProductInput::metafield()`.
+
+## Media (idempotent / upsert)
+
+`productCreateMedia` does **not** dedupe by source, so calling it twice creates
+duplicate files. `ensureMedia()` fixes that: it compares each media's **key (its
+`alt`)** against the product's existing media and creates only what's missing — so
+re-runs never add the same asset twice. Give each asset a stable `alt` (it defaults
+to the source filename).
+
+```php
+use Baldie81\ShopifyGraphQL\Support\Media;
+
+$result = $shopify->products()->ensureMedia($productId, [
+    Media::image('https://cdn.example.com/front.jpg', alt: 'front'),
+    Media::image('https://cdn.example.com/back.jpg',  alt: 'back'),
+]);
+// $result === ['added' => [...], 'skipped' => ['front'], 'mediaUserErrors' => []]
+
+// Run it again with the same input → everything is skipped, nothing duplicated.
+$shopify->products()->addMedia($productId, [...]);  // raw, non-idempotent escape hatch
+```
+
+> Idempotency is keyed on `alt` because that's the only writable, queryable string
+> on a media object — so reserve `alt` as a stable key per asset.
+
+## Bulk operations
+
+Run a query (export) or mutation (import) that Shopify processes asynchronously and
+returns as a JSONL file. Kick off, poll to a terminal status, then read `url`.
+
+```php
+$bulk = $shopify->bulkOperations();
+
+$op = $bulk->runQuery('{ products { edges { node { id title } } } }')['bulkOperation'];
+$final = $bulk->poll($op['id']);          // waits until COMPLETED/FAILED/CANCELED/EXPIRED
+
+if (($final['status'] ?? null) === 'COMPLETED') {
+    $jsonlUrl = $final['url'];             // download + parse line-by-line
+}
+
+// Imports run a mutation per JSONL line; upload variables via staged uploads first,
+// then pass the staged path:
+$bulk->runMutation($mutationString, $stagedUploadPath);
+$bulk->current('QUERY');                  // most recent op of a type
+$bulk->cancel($op['id']);
+```
+
 ## GraphQL specifics (how this differs from a REST SDK)
 
 - **Selection sets.** Reads return a curated default field set (`Products::FIELDS`),
@@ -95,8 +171,9 @@ Unit tests mock Guzzle (no network). The live check is `examples/products_smoke_
 ## Not yet in the spike
 
 Other resources (orders, customers, inventory…), caller-supplied selection sets,
-the Bulk Operations API (async JSONL), `productDelete`, and variants
-(`productVariantsBulkCreate`). The Products slice is the template the rest follows.
+staged uploads (`stagedUploadsCreate`, needed to drive a bulk *mutation*'s JSONL
+end-to-end), `productDelete`, and variants (`productVariantsBulkCreate`). The
+Products slice is the template the rest follows.
 
 ## License
 

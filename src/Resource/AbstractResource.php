@@ -31,6 +31,22 @@ abstract class AbstractResource
     }
 
     /**
+     * Normalise a list of object-or-array arguments.
+     *
+     * @param iterable<Arrayable|array<string,mixed>> $values
+     * @return list<array<string,mixed>>
+     */
+    protected function payloads(iterable $values): array
+    {
+        $out = [];
+        foreach ($values as $value) {
+            $out[] = $this->payload($value);
+        }
+
+        return $out;
+    }
+
+    /**
      * Walk a top-level Relay connection by cursor and return the merged `nodes`.
      *
      * The query must accept `$first: Int!` and `$after: String` and select

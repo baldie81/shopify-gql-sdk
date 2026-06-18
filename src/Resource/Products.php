@@ -116,6 +116,124 @@ final class Products extends AbstractResource
         return $data['productUpdate'] ?? ['product' => null, 'userErrors' => []];
     }
 
+    /**
+     * Set (create-or-update) metafields on a product. `metafieldsSet` upserts by
+     * (owner, namespace, key), so this is naturally idempotent. Accepts
+     * {@see \Baldie81\ShopifyGraphQL\Support\Metafield} builders or raw arrays;
+     * the product `ownerId` is injected. Chunked to Shopify's 25-per-call limit.
+     *
+     * @param list<\Baldie81\ShopifyGraphQL\Support\Metafield|array<string,mixed>> $metafields
+     * @return array{metafields:list<array<string,mixed>>,userErrors:list<array<string,mixed>>}
+     */
+    public function setMetafields(string $id, array $metafields): array
+    {
+        $ownerId  = Gid::product($id);
+        $mutation = 'mutation ($metafields: [MetafieldsSetInput!]!) {'
+            . ' metafieldsSet(metafields: $metafields) {'
+            . ' metafields { id namespace key type value } userErrors { field message code } } }';
+
+        $inputs = [];
+        foreach ($this->payloads($metafields) as $metafield) {
+            $inputs[] = ['ownerId' => $ownerId] + $metafield;
+        }
+
+        $merged = ['metafields' => [], 'userErrors' => []];
+        foreach (array_chunk($inputs, 25) as $chunk) {
+            $result = $this->gql->execute($mutation, ['metafields' => $chunk])['metafieldsSet'] ?? [];
+            foreach ($result['metafields'] ?? [] as $metafield) {
+                $merged['metafields'][] = $metafield;
+            }
+            foreach ($result['userErrors'] ?? [] as $error) {
+                $merged['userErrors'][] = $error;
+            }
+        }
+
+        return $merged;
+    }
+
+    /**
+     * List a product's existing media nodes (`id`, `alt`, `mediaContentType`,
+     * `status`).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function media(string $id, int $first = self::MAX_PAGE_SIZE): array
+    {
+        $first = max(1, min($first, self::MAX_PAGE_SIZE));
+        $query = 'query ($id: ID!, $first: Int!) {'
+            . ' product(id: $id) { media(first: $first) { nodes { id alt mediaContentType status } } } }';
+
+        $data = $this->gql->execute($query, ['id' => Gid::product($id), 'first' => $first]);
+
+        return $data['product']['media']['nodes'] ?? [];
+    }
+
+    /**
+     * Attach media to a product (raw `productCreateMedia`). NOT idempotent —
+     * Shopify does not dedupe by source, so repeated calls create duplicate
+     * files. Use {@see ensureMedia()} for idempotent assignment.
+     *
+     * @param list<\Baldie81\ShopifyGraphQL\Support\Media|array<string,mixed>> $media
+     * @return array{media:list<array<string,mixed>>,mediaUserErrors:list<array<string,mixed>>}
+     */
+    public function addMedia(string $id, array $media): array
+    {
+        $mutation = 'mutation ($productId: ID!, $media: [CreateMediaInput!]!) {'
+            . ' productCreateMedia(productId: $productId, media: $media) {'
+            . ' media { id alt mediaContentType status } mediaUserErrors { field message code } } }';
+
+        $data = $this->gql->execute($mutation, [
+            'productId' => Gid::product($id),
+            'media'     => $this->payloads($media),
+        ]);
+
+        return $data['productCreateMedia'] ?? ['media' => [], 'mediaUserErrors' => []];
+    }
+
+    /**
+     * Idempotently assign media to a product: fetch the product's existing media,
+     * skip any whose key (the `alt`) is already present, and create only the rest
+     * — so re-running never adds the same file twice. The requested batch is also
+     * de-duped by key. Media without a key can't be deduped and is always added.
+     *
+     * @param list<\Baldie81\ShopifyGraphQL\Support\Media|array<string,mixed>> $media
+     * @return array{added:list<array<string,mixed>>,skipped:list<string>,mediaUserErrors:list<array<string,mixed>>}
+     */
+    public function ensureMedia(string $id, array $media): array
+    {
+        $existing = [];
+        foreach ($this->media($id) as $node) {
+            $alt = $node['alt'] ?? null;
+            if (is_string($alt) && $alt !== '') {
+                $existing[$alt] = true;
+            }
+        }
+
+        $toAdd   = [];
+        $skipped = [];
+        $seen    = [];
+        foreach ($this->payloads($media) as $payload) {
+            $key = (string) ($payload['alt'] ?? '');
+            if ($key !== '' && (isset($existing[$key]) || isset($seen[$key]))) {
+                $skipped[] = $key;
+                continue;
+            }
+            if ($key !== '') {
+                $seen[$key] = true;
+            }
+            $toAdd[] = $payload;
+        }
+
+        $result = ['added' => [], 'skipped' => $skipped, 'mediaUserErrors' => []];
+        if ($toAdd !== []) {
+            $created                   = $this->addMedia($id, $toAdd);
+            $result['added']           = $created['media'] ?? [];
+            $result['mediaUserErrors'] = $created['mediaUserErrors'] ?? [];
+        }
+
+        return $result;
+    }
+
     private static function listQuery(): string
     {
         return 'query ($first: Int!, $after: String, $query: String) {'

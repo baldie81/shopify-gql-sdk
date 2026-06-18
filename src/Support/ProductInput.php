@@ -24,6 +24,9 @@ final class ProductInput implements Arrayable
     /** @var array<string,mixed> */
     private array $fields = [];
 
+    /** @var list<array<string,mixed>> */
+    private array $metafields = [];
+
     /**
      * Title is required to create a product, optional when updating; pass null
      * to build an update that doesn't change it.
@@ -91,8 +94,33 @@ final class ProductInput implements Arrayable
     }
 
     /**
-     * Escape hatch for any input field not modelled above (e.g. `seo`,
-     * `metafields`, `giftCard`).
+     * Attach a metafield to set as part of the create/update (upserted by
+     * namespace/key for the product). Accepts a {@see Metafield} builder or a
+     * raw array.
+     *
+     * @param Metafield|array<string,mixed> $metafield
+     */
+    public function metafield(Metafield|array $metafield): self
+    {
+        $this->metafields[] = $metafield instanceof Arrayable ? $metafield->toArray() : $metafield;
+
+        return $this;
+    }
+
+    /**
+     * @param list<Metafield|array<string,mixed>> $metafields
+     */
+    public function metafields(array $metafields): self
+    {
+        foreach ($metafields as $metafield) {
+            $this->metafield($metafield);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Escape hatch for any input field not modelled above (e.g. `seo`, `giftCard`).
      */
     public function set(string $field, mixed $value): self
     {
@@ -103,6 +131,12 @@ final class ProductInput implements Arrayable
 
     public function toArray(): array
     {
-        return $this->fields;
+        $input = $this->fields;
+
+        if ($this->metafields !== []) {
+            $input['metafields'] = $this->metafields;
+        }
+
+        return $input;
     }
 }

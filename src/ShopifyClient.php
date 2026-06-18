@@ -7,6 +7,7 @@ namespace Baldie81\ShopifyGraphQL;
 use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\ClientInterface;
 use Baldie81\ShopifyGraphQL\GraphQL\Client as GraphQLClient;
+use Baldie81\ShopifyGraphQL\Resource\BulkOperations;
 use Baldie81\ShopifyGraphQL\Resource\Products;
 
 /**
@@ -22,6 +23,7 @@ use Baldie81\ShopifyGraphQL\Resource\Products;
 final class ShopifyClient
 {
     private ?Products $products = null;
+    private ?BulkOperations $bulkOperations = null;
 
     public function __construct(
         private readonly GraphQLClient $gql,
@@ -65,5 +67,10 @@ final class ShopifyClient
     public function products(): Products
     {
         return $this->products ??= new Products($this->gql);
+    }
+
+    public function bulkOperations(): BulkOperations
+    {
+        return $this->bulkOperations ??= new BulkOperations($this->gql);
     }
 }
