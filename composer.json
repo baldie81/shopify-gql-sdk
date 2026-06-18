@@ -1,0 +1,39 @@
+{
+  "name": "baldie81/shopify-gql-sdk",
+  "description": "Framework-independent PHP SDK for the Shopify Admin GraphQL API. Spike: products vertical slice.",
+  "type": "library",
+  "license": "MIT",
+  "keywords": ["shopify", "graphql", "admin-api", "sdk", "ecommerce", "guzzle"],
+  "authors": [
+    {
+      "name": "baldie81"
+    }
+  ],
+  "require": {
+    "php": "^8.4",
+    "ext-json": "*",
+    "guzzlehttp/guzzle": "^7.5"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "Baldie81\\ShopifyGraphQL\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Baldie81\\ShopifyGraphQL\\Tests\\": "tests/"
+    }
+  },
+  "config": {
+    "optimize-autoloader": true,
+    "sort-packages": true
+  },
+  "scripts": {
+    "test": "phpunit"
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
