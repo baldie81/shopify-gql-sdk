@@ -8,6 +8,7 @@ use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\ClientInterface;
 use Baldie81\ShopifyGraphQL\GraphQL\Client as GraphQLClient;
 use Baldie81\ShopifyGraphQL\Resource\BulkOperations;
+use Baldie81\ShopifyGraphQL\Resource\Files;
 use Baldie81\ShopifyGraphQL\Resource\Products;
 use Baldie81\ShopifyGraphQL\Resource\Translations;
 
@@ -26,6 +27,7 @@ final class ShopifyClient
     private ?Products $products = null;
     private ?BulkOperations $bulkOperations = null;
     private ?Translations $translations = null;
+    private ?Files $files = null;
 
     public function __construct(
         private readonly GraphQLClient $gql,
@@ -79,5 +81,10 @@ final class ShopifyClient
     public function translations(): Translations
     {
         return $this->translations ??= new Translations($this->gql);
+    }
+
+    public function files(): Files
+    {
+        return $this->files ??= new Files($this->gql);
     }
 }

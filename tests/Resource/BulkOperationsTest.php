@@ -11,6 +11,7 @@ use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use Baldie81\ShopifyGraphQL\GraphQL\Client;
 use Baldie81\ShopifyGraphQL\Resource\BulkOperations;
+use Baldie81\ShopifyGraphQL\Resource\Files;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\RequestInterface;
 
@@ -79,6 +80,58 @@ final class BulkOperationsTest extends TestCase
 
         self::assertSame('COMPLETED', $op['status']);
         self::assertCount(2, $this->history); // polled twice
+    }
+
+    public function testImportMutationStagesJsonlThenRunsMutation(): void
+    {
+        $gqlHistory = [];
+        $upHistory  = [];
+
+        $gqlStack = HandlerStack::create(new MockHandler([
+            new Response(200, [], (string) json_encode(['data' => ['stagedUploadsCreate' => [
+                'stagedTargets' => [[
+                    'url'         => 'https://gcs/bulk',
+                    'resourceUrl' => 'https://gcs/bulk/res',
+                    'parameters'  => [['name' => 'key', 'value' => 'tmp/bulk/vars.jsonl']],
+                ]],
+                'userErrors' => [],
+            ]]])),
+            new Response(200, [], (string) json_encode(['data' => ['bulkOperationRunMutation' => [
+                'bulkOperation' => ['id' => 'gid://shopify/BulkOperation/9', 'status' => 'CREATED'],
+                'userErrors'    => [],
+            ]]])),
+        ]));
+        $gqlStack->push(Middleware::history($gqlHistory));
+        $gql = new Client(new GuzzleClient([
+            'handler'     => $gqlStack,
+            'base_uri'    => 'https://t.myshopify.com/admin/api/2025-07/',
+            'http_errors' => true,
+        ]));
+
+        $upStack = HandlerStack::create(new MockHandler([new Response(201)]));
+        $upStack->push(Middleware::history($upHistory));
+        $files = new Files($gql, new GuzzleClient(['handler' => $upStack, 'http_errors' => true]));
+
+        $bulk = new BulkOperations($gql, static fn (int $us) => null, $files);
+
+        $result = $bulk->importMutation(
+            'mutation call($input: ProductInput!) { productUpdate(input: $input) { product { id } } }',
+            [
+                ['input' => ['id' => 'gid://shopify/Product/1', 'title' => 'A']],
+                ['input' => ['id' => 'gid://shopify/Product/2', 'title' => 'B']],
+            ],
+        );
+
+        self::assertSame('CREATED', $result['bulkOperation']['status']);
+
+        $stagedVars = json_decode((string) $gqlHistory[0]['request']->getBody(), true)['variables'];
+        self::assertSame('BULK_MUTATION_VARIABLES', $stagedVars['input'][0]['resource']);
+
+        // bulkOperationRunMutation must receive the staged "key" as stagedUploadPath.
+        $runVars = json_decode((string) $gqlHistory[1]['request']->getBody(), true)['variables'];
+        self::assertSame('tmp/bulk/vars.jsonl', $runVars['path']);
+
+        self::assertCount(1, $upHistory); // single JSONL push
     }
 
     public function testCancelReturnsPayload(): void

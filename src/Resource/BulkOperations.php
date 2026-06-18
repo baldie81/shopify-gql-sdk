@@ -24,10 +24,13 @@ final class BulkOperations extends AbstractResource
     /** @var callable(int):void */
     private $sleeper;
 
-    public function __construct(Client $gql, ?callable $sleeper = null)
+    private readonly Files $files;
+
+    public function __construct(Client $gql, ?callable $sleeper = null, ?Files $files = null)
     {
         parent::__construct($gql);
         $this->sleeper = $sleeper ?? static fn (int $microseconds) => usleep($microseconds);
+        $this->files   = $files ?? new Files($gql);
     }
 
     /**
@@ -61,6 +64,45 @@ final class BulkOperations extends AbstractResource
         $data = $this->gql->execute($gql, ['mutation' => $mutation, 'path' => $stagedUploadPath]);
 
         return $data['bulkOperationRunMutation'] ?? ['bulkOperation' => null, 'userErrors' => []];
+    }
+
+    /**
+     * Run a bulk mutation over many inputs end-to-end: serialise `$rows` to JSONL,
+     * upload it as a `BULK_MUTATION_VARIABLES` staged file, and start
+     * `bulkOperationRunMutation`. Each row is the variables for one invocation of
+     * `$mutation` (e.g. `['input' => [...]]`). Poll the returned operation with
+     * {@see poll()}.
+     *
+     * Note: the rows must reference already-resolvable sources — a bulk mutation
+     * can't perform the per-file byte uploads that {@see Files::upload()} does, so
+     * media rows need hosted/pre-staged URLs.
+     *
+     * @param iterable<array<string,mixed>> $rows
+     * @return array{bulkOperation:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     */
+    public function importMutation(string $mutation, iterable $rows): array
+    {
+        $jsonl = self::toJsonl($rows);
+        if ($jsonl === '') {
+            return ['bulkOperation' => null, 'userErrors' => [['message' => 'No rows to import.']]];
+        }
+
+        $stagedUploadPath = $this->files->stageJsonl($jsonl);
+
+        return $this->runMutation($mutation, $stagedUploadPath);
+    }
+
+    /**
+     * @param iterable<array<string,mixed>> $rows
+     */
+    private static function toJsonl(iterable $rows): string
+    {
+        $lines = [];
+        foreach ($rows as $row) {
+            $lines[] = (string) json_encode($row);
+        }
+
+        return implode("\n", $lines);
     }
 
     /**

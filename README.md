@@ -18,13 +18,18 @@ REST Admin API, so this is GraphQL-only from the start.
   on `THROTTLED`** using Shopify's calculated query-cost block.
 - **`Resource\Products`** — queries/mutations with a lean default selection set,
   plus metafields (`setMetafields`) and idempotent media (`ensureMedia`).
-- **`Resource\BulkOperations`** — run a bulk query/mutation, poll, read the JSONL.
+- **`Resource\BulkOperations`** — bulk query, and `importMutation()` (JSONL +
+  `BULK_MUTATION_VARIABLES` staged upload), poll, read the JSONL.
 - **`Resource\Translations`** — translate any resource (products, metafields…),
   with the digest lookup handled for you.
+- **`Resource\Files`** — staged uploads (push local files to Shopify) and
+  `fileUpdate` (replace an image's bytes in place).
 - **`Support\ProductInput`** — fluent `Arrayable` builder for `ProductCreateInput` /
   `ProductUpdateInput`, incl. inline metafields (write methods accept `builder|array`).
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
 - **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
+- **`Support\MediaSlot` / `Support\MediaFolder`** — positioned media + parsing a
+  folder of `SKU_1.jpg`, `SKU_2.jpg`, … drops.
 - **`Support\Translation`** — `TranslationInput` builder (digest optional).
 - **`Support\ProductField`** — fluent per-field translations (`title()->withTranslation(...)`).
 - **`Support\Gid`** — global-ID helpers (`gid://shopify/Product/123`).
@@ -123,6 +128,39 @@ $shopify->products()->addMedia($productId, [...]);  // raw, non-idempotent escap
 > Idempotency is keyed on `alt` because that's the only writable, queryable string
 > on a media object — so reserve `alt` as a stable key per asset.
 
+### Local files & the `SKU_1.jpg` / `SKU_2.jpg` workflow
+
+When images arrive as files (e.g. an FTP drop) rather than URLs, they have no
+source Shopify can fetch, so the SDK uploads the bytes via a staged upload first.
+A common convention is a folder of `<sku>_<position>.<ext>` files where the
+trailing number is the display order (1 = main image). `MediaFolder::scan()` parses
+that into ordered slots per SKU, and `Products::syncMedia()` applies them
+**idempotently**:
+
+```php
+use Baldie81\ShopifyGraphQL\Support\MediaFolder;
+
+foreach (MediaFolder::scan('/ftp/incoming') as $sku => $slots) {
+    $productId = $shopify->products()->findIdBySku($sku);
+    if ($productId === null) {
+        continue; // unknown SKU
+    }
+    $result = $shopify->products()->syncMedia($productId, $slots);
+    // ['created' => [...], 'replaced' => [...], 'orderedIds' => [...], 'reorder' => ..., 'userErrors' => []]
+}
+```
+
+For each slot `syncMedia()`:
+1. uploads the local file (staged upload) — or uses the URL for `MediaSlot::url()`;
+2. if a media with the same key (`alt`, defaulting to the filename) already exists,
+   **replaces its bytes in place via `fileUpdate`** (no duplicate file) — otherwise
+   creates it;
+3. **reorders** all touched media so positions match (`_1` → first, `_2` → second…).
+
+So re-dropping `ACME-1_1.jpg` with new content swaps that one image and keeps the
+order, instead of piling up duplicates. The low-level pieces are available too:
+`files()->upload($path)`, `files()->update([...])`, and `products()->reorderMedia($id, $orderedIds)`.
+
 ## Bulk operations
 
 Run a query (export) or mutation (import) that Shopify processes asynchronously and
@@ -138,12 +176,28 @@ if (($final['status'] ?? null) === 'COMPLETED') {
     $jsonlUrl = $final['url'];             // download + parse line-by-line
 }
 
-// Imports run a mutation per JSONL line; upload variables via staged uploads first,
-// then pass the staged path:
-$bulk->runMutation($mutationString, $stagedUploadPath);
 $bulk->current('QUERY');                  // most recent op of a type
 $bulk->cancel($op['id']);
 ```
+
+**Bulk imports (mutations)** run a mutation once per JSONL line. `importMutation()`
+does the whole flow — serialise the rows to JSONL, upload them as a
+`BULK_MUTATION_VARIABLES` staged file, and start the operation:
+
+```php
+$started = $shopify->bulkOperations()->importMutation(
+    'mutation call($input: ProductInput!) { productUpdate(input: $input) { product { id } userErrors { field } } }',
+    [
+        ['input' => ['id' => 'gid://shopify/Product/1', 'title' => 'A']],
+        ['input' => ['id' => 'gid://shopify/Product/2', 'title' => 'B']],
+    ],
+);
+$final = $shopify->bulkOperations()->poll($started['bulkOperation']['id']);
+// (low level: $bulk->runMutation($mutation, $stagedUploadPath) if you staged the JSONL yourself)
+```
+
+A bulk mutation can't perform per-file byte uploads, so media rows must reference
+already-hosted/staged URLs — for local files use `Products::syncMedia()` instead.
 
 ## Translations
 
@@ -220,9 +274,8 @@ Unit tests mock Guzzle (no network). The live check is `examples/products_smoke_
 ## Not yet in the spike
 
 Other resources (orders, customers, inventory…), caller-supplied selection sets,
-staged uploads (`stagedUploadsCreate`, needed to drive a bulk *mutation*'s JSONL
-end-to-end), `productDelete`, and variants (`productVariantsBulkCreate`). The
-Products slice is the template the rest follows.
+`productDelete`, and variants (`productVariantsBulkCreate`). The Products slice is
+the template the rest follows.
 
 ## License
 

@@ -6,6 +6,7 @@ namespace Baldie81\ShopifyGraphQL\Resource;
 
 use Baldie81\ShopifyGraphQL\Support\Gid;
 use Baldie81\ShopifyGraphQL\Support\Media;
+use Baldie81\ShopifyGraphQL\Support\MediaSlot;
 use Baldie81\ShopifyGraphQL\Support\Metafield;
 use Baldie81\ShopifyGraphQL\Support\ProductField;
 use Baldie81\ShopifyGraphQL\Support\ProductInput;
@@ -287,6 +288,152 @@ final class Products extends AbstractResource
         $result['skipped'] = array_values(array_unique($skipped));
 
         return $result;
+    }
+
+    /**
+     * Resolve a product id from one of its variant SKUs (null if none match).
+     */
+    public function findIdBySku(string $sku): ?string
+    {
+        $query = 'query ($q: String!) { productVariants(first: 1, query: $q) { nodes { product { id } } } }';
+        $data  = $this->gql->execute($query, ['q' => 'sku:' . $sku]);
+
+        return $data['productVariants']['nodes'][0]['product']['id'] ?? null;
+    }
+
+    /**
+     * Reorder a product's media to match the given id order (index 0 = first /
+     * main image). `newPosition` is sent as a zero-based string, working around a
+     * known Shopify quirk.
+     *
+     * @param list<string> $orderedMediaIds
+     * @return array{job:?array<string,mixed>,mediaUserErrors:list<array<string,mixed>>}
+     */
+    public function reorderMedia(string $id, array $orderedMediaIds): array
+    {
+        $moves = [];
+        foreach (array_values($orderedMediaIds) as $index => $mediaId) {
+            $moves[] = ['id' => $mediaId, 'newPosition' => (string) $index];
+        }
+
+        $mutation = 'mutation ($id: ID!, $moves: [MoveInput!]!) {'
+            . ' productReorderMedia(id: $id, moves: $moves) {'
+            . ' job { id done } mediaUserErrors { field message } } }';
+
+        $data = $this->gql->execute($mutation, ['id' => Gid::product($id), 'moves' => $moves]);
+
+        return $data['productReorderMedia'] ?? ['job' => null, 'mediaUserErrors' => []];
+    }
+
+    /**
+     * Synchronise a product's images to the given ordered slots, idempotently:
+     * for each slot, upload the local file (or use its URL), then **replace** the
+     * existing media if one already carries the slot's key (its `alt`) — so a
+     * re-sync never creates duplicate files — otherwise create it. Finally,
+     * reorder all touched media to the slots' positions (slot position 1 = main).
+     *
+     * This matches the "FTP folder of `SKU_1`, `SKU_2`, …" workflow: pair it with
+     * {@see \Baldie81\ShopifyGraphQL\Support\MediaFolder::scan()} and
+     * {@see findIdBySku()}.
+     *
+     * @param list<MediaSlot> $slots
+     * @return array{created:list<string>,replaced:list<string>,orderedIds:list<string>,reorder:array<string,mixed>,userErrors:list<array<string,mixed>>}
+     */
+    public function syncMedia(string $id, array $slots): array
+    {
+        $gid   = Gid::product($id);
+        $files = new Files($this->gql);
+
+        $existing = [];
+        foreach ($this->media($gid) as $node) {
+            $alt = $node['alt'] ?? null;
+            if (is_string($alt) && $alt !== '' && isset($node['id'])) {
+                $existing[$alt] = (string) $node['id'];
+            }
+        }
+
+        usort($slots, static fn (MediaSlot $a, MediaSlot $b): int => $a->position() <=> $b->position());
+
+        // Resolve every source up front: one stagedUploadsCreate covers all local
+        // files (their bytes are still pushed individually).
+        $localPaths = [];
+        foreach ($slots as $i => $slot) {
+            if ($slot->isLocal()) {
+                $localPaths[$i] = $slot->source();
+            }
+        }
+        $uploaded = $localPaths === []
+            ? []
+            : array_combine(array_keys($localPaths), $files->uploadMany(array_values($localPaths)));
+
+        // Partition into one batch of replaces and one batch of creates.
+        $replaceInputs = [];
+        $replaced      = [];
+        $createInputs  = [];
+        $createKeys    = [];
+        foreach ($slots as $i => $slot) {
+            $key    = $slot->key();
+            $source = $slot->isLocal() ? $uploaded[$i] : $slot->source();
+
+            if (isset($existing[$key]) && $existing[$key] !== '') {
+                $replaceInputs[] = ['id' => $existing[$key], 'originalSource' => $source, 'alt' => $key];
+                $replaced[]      = $key;
+            } else {
+                $createInputs[] = ['originalSource' => $source, 'mediaContentType' => 'IMAGE', 'alt' => $key];
+                $createKeys[]   = $key;
+            }
+        }
+
+        $userErrors = [];
+
+        if ($replaceInputs !== []) {
+            $result = $files->update($replaceInputs);
+            foreach ($result['userErrors'] ?? [] as $error) {
+                $userErrors[] = $error;
+            }
+        }
+
+        $created = [];
+        if ($createInputs !== []) {
+            $result       = $this->addMedia($gid, $createInputs);
+            $createdMedia = $result['media'] ?? [];
+            foreach ($result['mediaUserErrors'] ?? [] as $error) {
+                $userErrors[] = $error;
+            }
+            // productCreateMedia returns media in input order.
+            foreach ($createKeys as $index => $key) {
+                $newId = $createdMedia[$index]['id'] ?? null;
+                if ($newId !== null) {
+                    $existing[$key] = (string) $newId;
+                    $created[]      = $key;
+                }
+            }
+        }
+
+        // Final order, in slot position order, using the (now-known) media ids.
+        $orderedIds = [];
+        foreach ($slots as $slot) {
+            $mediaId = $existing[$slot->key()] ?? null;
+            if ($mediaId !== null && $mediaId !== '') {
+                $orderedIds[] = $mediaId;
+            }
+        }
+
+        $reorder = ['job' => null, 'mediaUserErrors' => []];
+        if (count($orderedIds) > 1) {
+            $reorder = $this->reorderMedia($gid, $orderedIds);
+            foreach ($reorder['mediaUserErrors'] ?? [] as $error) {
+                $userErrors[] = $error;
+            }
+        }
+
+        return [
+            'created'    => $created,
+            'replaced'   => $replaced,
+            'orderedIds' => $orderedIds,
+            'reorder'    => $reorder,
+            'userErrors' => $userErrors,
+        ];
     }
 
     private static function listQuery(): string
