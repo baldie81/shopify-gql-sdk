@@ -19,12 +19,16 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Resource\Products`** — queries/mutations with a lean default selection set,
   plus metafields (`setMetafields`) and idempotent media (`ensureMedia`).
 - **`Resource\BulkOperations`** — run a bulk query/mutation, poll, read the JSONL.
+- **`Resource\Translations`** — translate any resource (products, metafields…),
+  with the digest lookup handled for you.
 - **`Support\ProductInput`** — fluent `Arrayable` builder for `ProductCreateInput` /
   `ProductUpdateInput`, incl. inline metafields (write methods accept `builder|array`).
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
 - **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
+- **`Support\Translation`** — `TranslationInput` builder (digest optional).
 - **`Support\Gid`** — global-ID helpers (`gid://shopify/Product/123`).
-- **Enums** — `ProductStatus`, `MetafieldType`, `MediaContentType`, `BulkOperationStatus`.
+- **Enums** — `ProductStatus`, `MetafieldType`, `MediaContentType`,
+  `BulkOperationStatus`, `ProductTranslatableField`.
 - **Exceptions** — `GraphQLException` (top-level errors / non-2xx), `ThrottledException`
   (cost-limit / 429), `TransportException`, under a `ShopifyException` base.
 
@@ -138,6 +142,47 @@ if (($final['status'] ?? null) === 'COMPLETED') {
 $bulk->runMutation($mutationString, $stagedUploadPath);
 $bulk->current('QUERY');                  // most recent op of a type
 $bulk->cancel($op['id']);
+```
+
+## Translations
+
+Every registered translation must carry the `translatableContentDigest` of the
+source content, so the flow is always *read digests, then register*. `set()` does
+both — you just pass a locale and a map of values.
+
+The translatable **product** fields are `title`, **`body_html` (the description)**,
+`handle`, and `product_type`, plus the SEO `meta_title` / `meta_description` when
+customised. Use them via `ProductTranslatableField` (values are Shopify's keys):
+
+```php
+use Baldie81\ShopifyGraphQL\Enum\ProductTranslatableField as F;
+
+$shopify->products()->setTranslations($productId, 'fr', [
+    F::Title->value       => 'Chapeau de paille',
+    F::Description->value => '<p>Un chapeau de paille</p>',   // body_html
+    F::Handle->value      => 'chapeau-de-paille',
+    F::ProductType->value => 'Chapeau',
+]);
+// returns { translations, userErrors, skipped }; non-translatable keys land in `skipped`.
+```
+
+Metafields are translatable too (when publicly accessible) — they're just another
+resource, addressed by the **metafield's** GID with the key `value`:
+
+```php
+$metafieldGid = $result['metafields'][0]['id'];   // from setMetafields()
+$shopify->translations()->set($metafieldGid, 'fr', ['value' => 'Laine']);
+```
+
+The general resource works on any translatable GID, exposes the raw content, and
+can scope to a market:
+
+```php
+$shopify->translations()->translatableContent($gid);          // keys + digests
+$shopify->translations()->register($gid, [
+    Translation::make('es', ProductTranslatableField::Title, 'Sombrero'),  // digest auto-filled
+]);
+$shopify->translations()->remove($gid, [ProductTranslatableField::Title], ['fr']);
 ```
 
 ## GraphQL specifics (how this differs from a REST SDK)

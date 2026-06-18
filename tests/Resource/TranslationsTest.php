@@ -1,0 +1,131 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Baldie81\ShopifyGraphQL\Tests\Resource;
+
+use GuzzleHttp\Psr7\Response;
+use Baldie81\ShopifyGraphQL\Enum\ProductTranslatableField;
+use Baldie81\ShopifyGraphQL\Support\Translation;
+use Baldie81\ShopifyGraphQL\Tests\MockClientTestCase;
+
+final class TranslationsTest extends MockClientTestCase
+{
+    private static function content(array $entries): string
+    {
+        return (string) json_encode(['data' => ['translatableResource' => ['translatableContent' => $entries]]]);
+    }
+
+    private static function registered(): string
+    {
+        return (string) json_encode(['data' => ['translationsRegister' => ['translations' => [], 'userErrors' => []]]]);
+    }
+
+    public function testSetLooksUpDigestsThenRegisters(): void
+    {
+        $client = $this->mockClient([
+            new Response(200, [], self::content([
+                ['key' => 'title', 'digest' => 'D_TITLE', 'locale' => 'en'],
+                ['key' => 'body_html', 'digest' => 'D_BODY', 'locale' => 'en'],
+            ])),
+            new Response(200, [], self::registered()),
+        ]);
+
+        $result = $client->translations()->set('gid://shopify/Product/55', 'fr', [
+            'title'     => 'Chapeau',
+            'body_html' => '<p>desc</p>',
+        ]);
+
+        self::assertSame([], $result['skipped']);
+        self::assertCount(2, $this->history);
+
+        $vars = $this->body(1)['variables'];
+        self::assertSame('gid://shopify/Product/55', $vars['resourceId']);
+        self::assertSame(
+            ['locale' => 'fr', 'key' => 'title', 'value' => 'Chapeau', 'translatableContentDigest' => 'D_TITLE'],
+            $vars['translations'][0],
+        );
+        self::assertSame('D_BODY', $vars['translations'][1]['translatableContentDigest']);
+    }
+
+    public function testSetSkipsKeysThatAreNotTranslatable(): void
+    {
+        $client = $this->mockClient([
+            new Response(200, [], self::content([['key' => 'title', 'digest' => 'D', 'locale' => 'en']])),
+            new Response(200, [], self::registered()),
+        ]);
+
+        $result = $client->translations()->set('gid://shopify/Product/55', 'fr', [
+            'title'   => 'X',
+            'made_up' => 'Y',
+        ]);
+
+        self::assertSame(['made_up'], $result['skipped']);
+        self::assertCount(1, $this->body(1)['variables']['translations']);
+    }
+
+    public function testSetWithNoMatchableKeysMakesNoMutation(): void
+    {
+        $client = $this->mockClient([
+            new Response(200, [], self::content([['key' => 'title', 'digest' => 'D', 'locale' => 'en']])),
+        ]);
+
+        $result = $client->translations()->set('gid://shopify/Product/55', 'fr', ['nope' => 'Y']);
+
+        self::assertSame(['nope'], $result['skipped']);
+        self::assertSame([], $result['translations']);
+        self::assertCount(1, $this->history); // only the digest lookup
+    }
+
+    public function testRegisterAutoFillsMissingDigest(): void
+    {
+        $client = $this->mockClient([
+            new Response(200, [], self::content([['key' => 'title', 'digest' => 'D', 'locale' => 'en']])),
+            new Response(200, [], self::registered()),
+        ]);
+
+        $client->translations()->register('gid://shopify/Product/55', [
+            Translation::make('fr', ProductTranslatableField::Title, 'Chapeau'),
+        ]);
+
+        self::assertCount(2, $this->history);
+        self::assertSame('D', $this->body(1)['variables']['translations'][0]['translatableContentDigest']);
+    }
+
+    public function testRegisterWithProvidedDigestSkipsLookup(): void
+    {
+        $client = $this->mockClient([new Response(200, [], self::registered())]);
+
+        $client->translations()->register('gid://shopify/Product/55', [
+            Translation::make('fr', 'title', 'Chapeau', 'PROVIDED'),
+        ]);
+
+        self::assertCount(1, $this->history); // no translatableResource lookup
+        self::assertSame('PROVIDED', $this->body()['variables']['translations'][0]['translatableContentDigest']);
+    }
+
+    public function testProductSetTranslationsResolvesProductGid(): void
+    {
+        $client = $this->mockClient([
+            new Response(200, [], self::content([['key' => 'title', 'digest' => 'D', 'locale' => 'en']])),
+            new Response(200, [], self::registered()),
+        ]);
+
+        $client->products()->setTranslations('55', 'fr', ['title' => 'Chapeau']);
+
+        self::assertSame('gid://shopify/Product/55', $this->body(0)['variables']['resourceId']);
+    }
+
+    public function testRemoveSendsKeysAndLocales(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['translationsRemove' => ['translations' => [], 'userErrors' => []]],
+        ]))]);
+
+        $client->translations()->remove('gid://shopify/Product/55', [ProductTranslatableField::Title, 'body_html'], ['fr']);
+
+        $vars = $this->body()['variables'];
+        self::assertSame(['title', 'body_html'], $vars['keys']);
+        self::assertSame(['fr'], $vars['locales']);
+    }
+}

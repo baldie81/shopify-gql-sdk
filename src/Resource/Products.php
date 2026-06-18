@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Baldie81\ShopifyGraphQL\Resource;
 
 use Baldie81\ShopifyGraphQL\Support\Gid;
+use Baldie81\ShopifyGraphQL\Support\Media;
+use Baldie81\ShopifyGraphQL\Support\Metafield;
 use Baldie81\ShopifyGraphQL\Support\ProductInput;
 
 /**
@@ -22,7 +24,7 @@ final class Products extends AbstractResource
      * The default fields fetched for a product. Kept lean on purpose — Shopify
      * bills by query cost, so over-fetching has a real price.
      */
-    private const FIELDS = <<<'GQL'
+    private const string FIELDS = <<<'GQL'
         id
         title
         handle
@@ -119,10 +121,10 @@ final class Products extends AbstractResource
     /**
      * Set (create-or-update) metafields on a product. `metafieldsSet` upserts by
      * (owner, namespace, key), so this is naturally idempotent. Accepts
-     * {@see \Baldie81\ShopifyGraphQL\Support\Metafield} builders or raw arrays;
+     * {@see Metafield} builders or raw arrays;
      * the product `ownerId` is injected. Chunked to Shopify's 25-per-call limit.
      *
-     * @param list<\Baldie81\ShopifyGraphQL\Support\Metafield|array<string,mixed>> $metafields
+     * @param list<Metafield|array<string,mixed>> $metafields
      * @return array{metafields:list<array<string,mixed>>,userErrors:list<array<string,mixed>>}
      */
     public function setMetafields(string $id, array $metafields): array
@@ -173,7 +175,7 @@ final class Products extends AbstractResource
      * Shopify does not dedupe by source, so repeated calls create duplicate
      * files. Use {@see ensureMedia()} for idempotent assignment.
      *
-     * @param list<\Baldie81\ShopifyGraphQL\Support\Media|array<string,mixed>> $media
+     * @param list<Media|array<string,mixed>> $media
      * @return array{media:list<array<string,mixed>>,mediaUserErrors:list<array<string,mixed>>}
      */
     public function addMedia(string $id, array $media): array
@@ -196,7 +198,7 @@ final class Products extends AbstractResource
      * — so re-running never adds the same file twice. The requested batch is also
      * de-duped by key. Media without a key can't be deduped and is always added.
      *
-     * @param list<\Baldie81\ShopifyGraphQL\Support\Media|array<string,mixed>> $media
+     * @param list<Media|array<string,mixed>> $media
      * @return array{added:list<array<string,mixed>>,skipped:list<string>,mediaUserErrors:list<array<string,mixed>>}
      */
     public function ensureMedia(string $id, array $media): array
@@ -232,6 +234,20 @@ final class Products extends AbstractResource
         }
 
         return $result;
+    }
+
+    /**
+     * Translate product fields for a locale. `$values` is keyed by translatable
+     * key — use {@see \Baldie81\ShopifyGraphQL\Enum\ProductTranslatableField}'s
+     * value, e.g. `'body_html'` for the description. Digests are looked up for
+     * you; keys that aren't translatable come back under `skipped`.
+     *
+     * @param array<string,string> $values key => translated value
+     * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,skipped:list<string>}
+     */
+    public function setTranslations(string $id, string $locale, array $values, ?string $marketId = null): array
+    {
+        return (new Translations($this->gql))->set(Gid::product($id), $locale, $values, $marketId);
     }
 
     private static function listQuery(): string

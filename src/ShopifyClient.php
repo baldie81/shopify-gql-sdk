@@ -9,6 +9,7 @@ use GuzzleHttp\ClientInterface;
 use Baldie81\ShopifyGraphQL\GraphQL\Client as GraphQLClient;
 use Baldie81\ShopifyGraphQL\Resource\BulkOperations;
 use Baldie81\ShopifyGraphQL\Resource\Products;
+use Baldie81\ShopifyGraphQL\Resource\Translations;
 
 /**
  * Entry point for the SDK. Exposes the Shopify Admin GraphQL resources as
@@ -24,6 +25,7 @@ final class ShopifyClient
 {
     private ?Products $products = null;
     private ?BulkOperations $bulkOperations = null;
+    private ?Translations $translations = null;
 
     public function __construct(
         private readonly GraphQLClient $gql,
@@ -72,5 +74,10 @@ final class ShopifyClient
     public function bulkOperations(): BulkOperations
     {
         return $this->bulkOperations ??= new BulkOperations($this->gql);
+    }
+
+    public function translations(): Translations
+    {
+        return $this->translations ??= new Translations($this->gql);
     }
 }
