@@ -7,6 +7,7 @@ namespace Baldie81\ShopifyGraphQL\Resource;
 use Baldie81\ShopifyGraphQL\Support\Gid;
 use Baldie81\ShopifyGraphQL\Support\Media;
 use Baldie81\ShopifyGraphQL\Support\Metafield;
+use Baldie81\ShopifyGraphQL\Support\ProductField;
 use Baldie81\ShopifyGraphQL\Support\ProductInput;
 
 /**
@@ -237,17 +238,55 @@ final class Products extends AbstractResource
     }
 
     /**
-     * Translate product fields for a locale. `$values` is keyed by translatable
-     * key — use {@see \Baldie81\ShopifyGraphQL\Enum\ProductTranslatableField}'s
-     * value, e.g. `'body_html'` for the description. Digests are looked up for
-     * you; keys that aren't translatable come back under `skipped`.
+     * Translate product fields fluently, one or many locales at once:
      *
-     * @param array<string,string> $values key => translated value
+     *   $products->setTranslations($id, [
+     *       ProductField::title()->withTranslation('fr', 'Robe'),
+     *       ProductField::description()->withTranslation('fr', '<p>…</p>')->withTranslation('es', '<p>…</p>'),
+     *   ]);
+     *
+     * The required source digests are looked up automatically and one
+     * `translationsRegister` call covers every field/locale. Fields that aren't
+     * translatable on the product (e.g. uncustomised SEO) come back under
+     * `skipped` rather than erroring.
+     *
+     * @param list<ProductField> $fields
      * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,skipped:list<string>}
      */
-    public function setTranslations(string $id, string $locale, array $values, ?string $marketId = null): array
+    public function setTranslations(string $id, array $fields, ?string $marketId = null): array
     {
-        return (new Translations($this->gql))->set(Gid::product($id), $locale, $values, $marketId);
+        $gid          = Gid::product($id);
+        $translations = new Translations($this->gql);
+        $digests      = $translations->digests($gid);
+
+        $inputs  = [];
+        $skipped = [];
+        foreach ($fields as $field) {
+            $key = $field->key();
+            if (!isset($digests[$key])) {
+                if ($field->translations() !== []) {
+                    $skipped[] = $key;
+                }
+                continue;
+            }
+            foreach ($field->translations() as $translation) {
+                $input = [
+                    'locale'                    => $translation['locale'],
+                    'key'                       => $key,
+                    'value'                     => $translation['value'],
+                    'translatableContentDigest' => $digests[$key],
+                ];
+                if ($marketId !== null) {
+                    $input['marketId'] = $marketId;
+                }
+                $inputs[] = $input;
+            }
+        }
+
+        $result            = $inputs === [] ? ['translations' => [], 'userErrors' => []] : $translations->register($gid, $inputs);
+        $result['skipped'] = array_values(array_unique($skipped));
+
+        return $result;
     }
 
     private static function listQuery(): string

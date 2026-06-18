@@ -26,6 +26,7 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
 - **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
 - **`Support\Translation`** — `TranslationInput` builder (digest optional).
+- **`Support\ProductField`** — fluent per-field translations (`title()->withTranslation(...)`).
 - **`Support\Gid`** — global-ID helpers (`gid://shopify/Product/123`).
 - **Enums** — `ProductStatus`, `MetafieldType`, `MediaContentType`,
   `BulkOperationStatus`, `ProductTranslatableField`.
@@ -150,20 +151,23 @@ Every registered translation must carry the `translatableContentDigest` of the
 source content, so the flow is always *read digests, then register*. `set()` does
 both — you just pass a locale and a map of values.
 
-The translatable **product** fields are `title`, **`body_html` (the description)**,
-`handle`, and `product_type`, plus the SEO `meta_title` / `meta_description` when
-customised. Use them via `ProductTranslatableField` (values are Shopify's keys):
+The translatable **product** fields are `title`, **description (Shopify's key is
+`body_html`)**, `handle`, and `product_type`, plus the SEO `meta_title` /
+`meta_description` when customised. Translate them fluently with `ProductField` —
+each field knows its Shopify key, and one call covers every field and locale:
 
 ```php
-use Baldie81\ShopifyGraphQL\Enum\ProductTranslatableField as F;
+use Baldie81\ShopifyGraphQL\Support\ProductField;
 
-$shopify->products()->setTranslations($productId, 'fr', [
-    F::Title->value       => 'Chapeau de paille',
-    F::Description->value => '<p>Un chapeau de paille</p>',   // body_html
-    F::Handle->value      => 'chapeau-de-paille',
-    F::ProductType->value => 'Chapeau',
+$result = $shopify->products()->setTranslations($productId, [
+    ProductField::title()->withTranslation('fr', 'Chapeau de paille'),
+    ProductField::description()
+        ->withTranslation('fr', '<p>Un chapeau de paille</p>')
+        ->withTranslation('es', '<p>Un sombrero de paja</p>'),
+    ProductField::handle()->withTranslation('fr', 'chapeau-de-paille'),
+    ProductField::productType()->withTranslation('fr', 'Chapeau'),
 ]);
-// returns { translations, userErrors, skipped }; non-translatable keys land in `skipped`.
+// returns { translations, userErrors, skipped }; non-translatable fields land in `skipped`.
 ```
 
 Metafields are translatable too (when publicly accessible) — they're just another
