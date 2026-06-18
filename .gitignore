@@ -2,3 +2,6 @@
 /composer.lock
 .phpunit.cache/
 /examples/.env
+.idea/
+.env
+examples/
