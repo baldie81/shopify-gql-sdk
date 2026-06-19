@@ -14,6 +14,9 @@ namespace Baldie81\ShopifyGraphQL\Resource;
  */
 final class Inventory extends AbstractResource
 {
+    /** Shopify caps inventory set/adjust at 250 quantities/changes per call. */
+    private const MAX_QUANTITIES = 250;
+
     /**
      * Store locations (id, name, whether active / ships inventory).
      *
@@ -39,15 +42,11 @@ final class Inventory extends AbstractResource
             . ' inventorySetQuantities(input: $input) {'
             . ' inventoryAdjustmentGroup { reason changes { name delta quantityAfterChange } } userErrors { field message code } } }';
 
-        $input = [
+        return $this->bulk($mutation, 'inventorySetQuantities', 'quantities', $quantities, [
             'name'                  => $name,
             'reason'                => $reason,
             'ignoreCompareQuantity' => true,
-            'quantities'            => array_values($quantities),
-        ];
-
-        return $this->gql->execute($mutation, ['input' => $input])['inventorySetQuantities']
-            ?? ['inventoryAdjustmentGroup' => null, 'userErrors' => []];
+        ]);
     }
 
     /**
@@ -63,10 +62,32 @@ final class Inventory extends AbstractResource
             . ' inventoryAdjustQuantities(input: $input) {'
             . ' inventoryAdjustmentGroup { reason changes { name delta } } userErrors { field message code } } }';
 
-        $input = ['name' => $name, 'reason' => $reason, 'changes' => array_values($changes)];
+        return $this->bulk($mutation, 'inventoryAdjustQuantities', 'changes', $changes, ['name' => $name, 'reason' => $reason]);
+    }
 
-        return $this->gql->execute($mutation, ['input' => $input])['inventoryAdjustQuantities']
-            ?? ['inventoryAdjustmentGroup' => null, 'userErrors' => []];
+    /**
+     * Run a set/adjust mutation, chunking the entries at {@see MAX_QUANTITIES}.
+     * userErrors are aggregated; `inventoryAdjustmentGroup` reflects the last chunk.
+     *
+     * @param list<array<string,mixed>> $entries
+     * @param array<string,mixed>       $baseInput
+     * @return array{inventoryAdjustmentGroup:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     */
+    private function bulk(string $mutation, string $field, string $entriesKey, array $entries, array $baseInput): array
+    {
+        $merged = ['inventoryAdjustmentGroup' => null, 'userErrors' => []];
+        foreach (array_chunk(array_values($entries), self::MAX_QUANTITIES) as $chunk) {
+            $input  = $baseInput + [$entriesKey => $chunk];
+            $result = $this->gql->execute($mutation, ['input' => $input])[$field] ?? [];
+            if (isset($result['inventoryAdjustmentGroup'])) {
+                $merged['inventoryAdjustmentGroup'] = $result['inventoryAdjustmentGroup'];
+            }
+            foreach ($result['userErrors'] ?? [] as $error) {
+                $merged['userErrors'][] = $error;
+            }
+        }
+
+        return $merged;
     }
 
     /**

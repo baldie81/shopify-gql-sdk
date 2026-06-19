@@ -50,6 +50,23 @@ final class InventoryTest extends MockClientTestCase
         self::assertSame(-5, $body['variables']['input']['changes'][0]['delta']);
     }
 
+    public function testSetQuantitiesChunksAtTheLimit(): void
+    {
+        $ok = (string) json_encode(['data' => ['inventorySetQuantities' => ['inventoryAdjustmentGroup' => ['reason' => 'correction'], 'userErrors' => []]]]);
+        $client = $this->mockClient([new Response(200, [], $ok), new Response(200, [], $ok)]);
+
+        $quantities = [];
+        for ($i = 0; $i < 300; $i++) {
+            $quantities[] = ['inventoryItemId' => "gid://shopify/InventoryItem/{$i}", 'locationId' => 'gid://shopify/Location/1', 'quantity' => $i];
+        }
+
+        $client->inventory()->setQuantities($quantities);
+
+        self::assertCount(2, $this->history); // 300 -> 250 + 50
+        self::assertCount(250, $this->body(0)['variables']['input']['quantities']);
+        self::assertCount(50, $this->body(1)['variables']['input']['quantities']);
+    }
+
     public function testActivateSendsItemAndLocation(): void
     {
         $client = $this->mockClient([new Response(200, [], (string) json_encode([

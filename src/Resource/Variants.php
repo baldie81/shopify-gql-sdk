@@ -11,9 +11,15 @@ use Baldie81\ShopifyGraphQL\Support\VariantInput;
  * Product variants — prices (`price`, `compareAtPrice`) and the variant-level
  * `inventoryItem` fields (sku, barcode, tracked, cost), via
  * `productVariantsBulkUpdate`. Variant *quantities* live in {@see Inventory}.
+ *
+ * The bulk mutations cap at {@see MAX_VARIANTS} variants per call; create/update/
+ * delete split larger inputs into chunks automatically and merge the results.
  */
 final class Variants extends AbstractResource
 {
+    /** Shopify caps the bulk variant mutations at 250 variants per call. */
+    private const MAX_VARIANTS = 250;
+
     private const FIELDS = 'id title sku price compareAtPrice inventoryQuantity inventoryItem { id tracked }';
 
     /**
@@ -32,7 +38,7 @@ final class Variants extends AbstractResource
 
     /**
      * Update variants in bulk (prices/sku/tracked/…). Accepts {@see VariantInput}
-     * builders or raw arrays (each needs `id`).
+     * builders or raw arrays (each needs `id`). Chunked at {@see MAX_VARIANTS}.
      *
      * @param list<VariantInput|array<string,mixed>> $variants
      * @return array{productVariants:list<array<string,mixed>>,userErrors:list<array<string,mixed>>}
@@ -43,17 +49,13 @@ final class Variants extends AbstractResource
             . ' productVariantsBulkUpdate(productId: $productId, variants: $variants) {'
             . ' productVariants { ' . self::FIELDS . ' } userErrors { field message } } }';
 
-        $data = $this->gql->execute($mutation, [
-            'productId' => Gid::product($productId),
-            'variants'  => $this->payloads($variants),
-        ]);
-
-        return $data['productVariantsBulkUpdate'] ?? ['productVariants' => [], 'userErrors' => []];
+        return $this->bulk('productVariantsBulkUpdate', $mutation, $productId, $variants);
     }
 
     /**
      * Add variants to a product in bulk (`productVariantsBulkCreate`). The product
-     * must already have the matching options defined (see {@see \Baldie81\ShopifyGraphQL\Resource\Products::set()}).
+     * must already have the matching options defined (see
+     * {@see Products::set()}). Chunked at {@see MAX_VARIANTS}.
      *
      * @param list<VariantInput|array<string,mixed>> $variants
      * @return array{productVariants:list<array<string,mixed>>,userErrors:list<array<string,mixed>>}
@@ -64,16 +66,12 @@ final class Variants extends AbstractResource
             . ' productVariantsBulkCreate(productId: $productId, variants: $variants) {'
             . ' productVariants { ' . self::FIELDS . ' } userErrors { field message } } }';
 
-        $data = $this->gql->execute($mutation, [
-            'productId' => Gid::product($productId),
-            'variants'  => $this->payloads($variants),
-        ]);
-
-        return $data['productVariantsBulkCreate'] ?? ['productVariants' => [], 'userErrors' => []];
+        return $this->bulk('productVariantsBulkCreate', $mutation, $productId, $variants);
     }
 
     /**
-     * Delete variants from a product (`productVariantsBulkDelete`).
+     * Delete variants from a product (`productVariantsBulkDelete`). Chunked at
+     * {@see MAX_VARIANTS}.
      *
      * @param list<string> $variantIds
      * @return array{product:?array<string,mixed>,userErrors:list<array<string,mixed>>}
@@ -84,11 +82,39 @@ final class Variants extends AbstractResource
             . ' productVariantsBulkDelete(productId: $productId, variantsIds: $variantsIds) {'
             . ' product { id } userErrors { field message } } }';
 
-        $data = $this->gql->execute($mutation, [
-            'productId'   => Gid::product($productId),
-            'variantsIds' => array_values($variantIds),
-        ]);
+        $gid    = Gid::product($productId);
+        $merged = ['product' => null, 'userErrors' => []];
+        foreach (array_chunk(array_values($variantIds), self::MAX_VARIANTS) as $chunk) {
+            $result = $this->gql->execute($mutation, ['productId' => $gid, 'variantsIds' => $chunk])['productVariantsBulkDelete'] ?? [];
+            if (isset($result['product'])) {
+                $merged['product'] = $result['product'];
+            }
+            foreach ($result['userErrors'] ?? [] as $error) {
+                $merged['userErrors'][] = $error;
+            }
+        }
 
-        return $data['productVariantsBulkDelete'] ?? ['product' => null, 'userErrors' => []];
+        return $merged;
+    }
+
+    /**
+     * @param list<VariantInput|array<string,mixed>> $variants
+     * @return array{productVariants:list<array<string,mixed>>,userErrors:list<array<string,mixed>>}
+     */
+    private function bulk(string $field, string $mutation, string $productId, array $variants): array
+    {
+        $gid    = Gid::product($productId);
+        $merged = ['productVariants' => [], 'userErrors' => []];
+        foreach (array_chunk($this->payloads($variants), self::MAX_VARIANTS) as $chunk) {
+            $result = $this->gql->execute($mutation, ['productId' => $gid, 'variants' => $chunk])[$field] ?? [];
+            foreach ($result['productVariants'] ?? [] as $variant) {
+                $merged['productVariants'][] = $variant;
+            }
+            foreach ($result['userErrors'] ?? [] as $error) {
+                $merged['userErrors'][] = $error;
+            }
+        }
+
+        return $merged;
     }
 }

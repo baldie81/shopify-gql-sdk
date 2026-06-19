@@ -232,6 +232,13 @@ An inventory item must be **tracked** (`VariantInput::tracked()`) and stocked at
 location before a quantity sticks — `setQuantities()` works once stocked; `activate()`
 stocks it if not.
 
+These bulk methods (`variants()->create/update/delete()`,
+`inventory()->setQuantities/adjustQuantities()`) **auto-chunk** at Shopify's
+250-per-call cap — pass as many as you like and they split into multiple requests,
+merging the results. Variant mutations are scoped to one product; `setQuantities`
+is not, so a single call can stock items across many products. For mass
+cross-product writes, see the bulk-mutation path under "Bulk operations".
+
 ## Bulk operations
 
 Run a query (export) or mutation (import) that Shopify processes asynchronously and

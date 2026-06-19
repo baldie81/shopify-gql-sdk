@@ -50,6 +50,23 @@ final class VariantsTest extends MockClientTestCase
         self::assertStringContainsString('productVariantsBulkCreate', $this->body()['query']);
     }
 
+    public function testUpdateChunksAtTheLimit(): void
+    {
+        $ok = (string) json_encode(['data' => ['productVariantsBulkUpdate' => ['productVariants' => [], 'userErrors' => []]]]);
+        $client = $this->mockClient([new Response(200, [], $ok), new Response(200, [], $ok)]);
+
+        $variants = [];
+        for ($i = 0; $i < 300; $i++) {
+            $variants[] = VariantInput::make("gid://shopify/ProductVariant/{$i}")->price(10);
+        }
+
+        $client->variants()->update('55', $variants);
+
+        self::assertCount(2, $this->history); // 300 -> 250 + 50
+        self::assertCount(250, $this->body(0)['variables']['variants']);
+        self::assertCount(50, $this->body(1)['variables']['variants']);
+    }
+
     public function testDeleteSendsVariantsIds(): void
     {
         $client = $this->mockClient([new Response(200, [], (string) json_encode([
