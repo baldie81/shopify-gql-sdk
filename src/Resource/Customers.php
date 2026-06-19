@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Baldie81\ShopifyGraphQL\Resource;
 
+use Baldie81\ShopifyGraphQL\Support\Address;
 use Baldie81\ShopifyGraphQL\Support\CustomerInput;
 use Baldie81\ShopifyGraphQL\Support\Gid;
 
@@ -86,6 +87,75 @@ final class Customers extends AbstractResource
     public function setMetafields(string $id, array $metafields): array
     {
         return $this->setMetafieldsFor(Gid::customer($id), $metafields);
+    }
+
+    /**
+     * A customer's addresses.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function addresses(string $customerId, int $first = 50): array
+    {
+        $query = 'query ($id: ID!, $first: Int!) {'
+            . ' customer(id: $id) { addresses(first: $first) { id firstName lastName company address1 address2 city provinceCode countryCodeV2 zip phone } } }';
+
+        return $this->gql->execute($query, ['id' => Gid::customer($customerId), 'first' => $first])['customer']['addresses'] ?? [];
+    }
+
+    /**
+     * Add an address to a customer (`customerAddressCreate`), optionally as default.
+     *
+     * @param Address|array<string,mixed> $address
+     * @return array{address:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     */
+    public function addAddress(string $customerId, Address|array $address, bool $setAsDefault = false): array
+    {
+        $mutation = 'mutation ($customerId: ID!, $address: MailingAddressInput!, $setAsDefault: Boolean) {'
+            . ' customerAddressCreate(customerId: $customerId, address: $address, setAsDefault: $setAsDefault) {'
+            . ' address { id } userErrors { field message } } }';
+
+        return $this->gql->execute($mutation, [
+            'customerId'   => Gid::customer($customerId),
+            'address'      => $this->payload($address),
+            'setAsDefault' => $setAsDefault,
+        ])['customerAddressCreate'] ?? ['address' => null, 'userErrors' => []];
+    }
+
+    /**
+     * Update one of a customer's addresses (`customerAddressUpdate`).
+     *
+     * @param Address|array<string,mixed> $address
+     * @return array{address:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     */
+    public function updateAddress(string $customerId, string $addressId, Address|array $address, bool $setAsDefault = false): array
+    {
+        $mutation = 'mutation ($customerId: ID!, $addressId: ID!, $address: MailingAddressInput!, $setAsDefault: Boolean) {'
+            . ' customerAddressUpdate(customerId: $customerId, addressId: $addressId, address: $address, setAsDefault: $setAsDefault) {'
+            . ' address { id } userErrors { field message } } }';
+
+        return $this->gql->execute($mutation, [
+            'customerId'   => Gid::customer($customerId),
+            'addressId'    => $addressId,
+            'address'      => $this->payload($address),
+            'setAsDefault' => $setAsDefault,
+        ])['customerAddressUpdate'] ?? ['address' => null, 'userErrors' => []];
+    }
+
+    /**
+     * Delete one of a customer's addresses (`customerAddressDelete`).
+     *
+     * @return array{deletedAddressId:?string,userErrors:list<array<string,mixed>>}
+     */
+    public function deleteAddress(string $customerId, string $addressId): array
+    {
+        $mutation = 'mutation ($customerId: ID!, $addressId: ID!) {'
+            . ' customerAddressDelete(customerId: $customerId, addressId: $addressId) {'
+            . ' deletedAddressId userErrors { field message } } }';
+
+        return $this->gql->execute($mutation, [
+            'customerId' => Gid::customer($customerId),
+            'addressId'  => $addressId,
+        ])['customerAddressDelete'] ?? ['deletedAddressId' => null, 'userErrors' => []];
     }
 
     private static function listQuery(): string

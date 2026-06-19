@@ -19,9 +19,6 @@ final class CustomerInput implements Arrayable
     /** @var list<array<string,mixed>> */
     private array $metafields = [];
 
-    /** @var list<array<string,mixed>> */
-    private array $addresses = [];
-
     public static function make(?string $email = null): self
     {
         $input = new self();
@@ -116,21 +113,6 @@ final class CustomerInput implements Arrayable
         return $this;
     }
 
-    /**
-     * Add a mailing address.
-     *
-     * @param array<string,mixed> $address a MailingAddressInput (address1, city, countryCode, zip, …)
-     *
-     * @deprecated Shopify deprecated `CustomerInput.addresses`; for new code prefer
-     *             the dedicated customer-address mutations. Kept for convenience.
-     */
-    public function address(array $address): self
-    {
-        $this->addresses[] = $address;
-
-        return $this;
-    }
-
     public function set(string $field, mixed $value): self
     {
         $this->fields[$field] = $value;
@@ -143,9 +125,6 @@ final class CustomerInput implements Arrayable
         $input = $this->fields;
         if ($this->metafields !== []) {
             $input['metafields'] = $this->metafields;
-        }
-        if ($this->addresses !== []) {
-            $input['addresses'] = $this->addresses;
         }
 
         return $input;

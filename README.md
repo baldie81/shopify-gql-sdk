@@ -36,7 +36,7 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Support\ProductInput`** — fluent `Arrayable` builder for `ProductCreateInput` /
   `ProductUpdateInput`, incl. inline metafields (write methods accept `builder|array`).
 - **`Support\VariantInput`** — fluent builder for variant updates (price / compareAtPrice / sku / tracked).
-- **`Support\CustomerInput`** — fluent builder for customerCreate / customerUpdate.
+- **`Support\CustomerInput`** / **`Support\Address`** — builders for customers and mailing addresses.
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
 - **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
 - **`Support\MediaEntry` / `Support\MediaFolder`** — positioned media + parsing a
@@ -371,6 +371,17 @@ $res = $shopify->customers()->create(
 );
 $shopify->customers()->setMetafields($res['customer']['id'], [Metafield::text('erp', 'customer_id', 'C-1')]);
 $shopify->customers()->searchAll('tag:vip');
+
+// Addresses use the dedicated mutations (customerAddressCreate/Update/Delete):
+use Baldie81\ShopifyGraphQL\Support\Address;
+
+$shopify->customers()->addAddress($res['customer']['id'],
+    Address::make()->address1('500 Congress Ave')->city('Austin')->provinceCode('TX')->zip('78701')->countryCode('US'),
+    setAsDefault: true,
+);
+$shopify->customers()->addresses($customerId);                 // list
+$shopify->customers()->updateAddress($customerId, $addressId, Address::make()->city('Dallas'));
+$shopify->customers()->deleteAddress($customerId, $addressId);
 ```
 
 Orders aren't *created* via the API here (that's checkout / draft orders) — the
