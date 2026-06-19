@@ -11,6 +11,7 @@ use Baldie81\ShopifyGraphQL\Resource\BulkOperations;
 use Baldie81\ShopifyGraphQL\Resource\Collections;
 use Baldie81\ShopifyGraphQL\Resource\Customers;
 use Baldie81\ShopifyGraphQL\Resource\Files;
+use Baldie81\ShopifyGraphQL\Resource\FulfillmentOrders;
 use Baldie81\ShopifyGraphQL\Resource\Inventory;
 use Baldie81\ShopifyGraphQL\Resource\MetafieldDefinitions;
 use Baldie81\ShopifyGraphQL\Resource\Orders;
@@ -40,6 +41,7 @@ final class ShopifyClient
     private ?Customers $customers = null;
     private ?Orders $orders = null;
     private ?Collections $collections = null;
+    private ?FulfillmentOrders $fulfillmentOrders = null;
 
     public function __construct(
         private readonly GraphQLClient $gql,
@@ -128,5 +130,10 @@ final class ShopifyClient
     public function collections(): Collections
     {
         return $this->collections ??= new Collections($this->gql);
+    }
+
+    public function fulfillmentOrders(): FulfillmentOrders
+    {
+        return $this->fulfillmentOrders ??= new FulfillmentOrders($this->gql);
     }
 }
