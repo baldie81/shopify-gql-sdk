@@ -14,28 +14,35 @@ use Baldie81\ShopifyGraphQL\Support\Gid;
  */
 final class Customers extends AbstractResource
 {
-    private const FIELDS = 'id legacyResourceId email firstName lastName phone numberOfOrders createdAt updatedAt';
+    private const ADDRESS_BODY = 'id firstName lastName company address1 address2 city provinceCode countryCodeV2 zip phone';
+
+    private const FIELDS = 'id legacyResourceId email firstName lastName phone numberOfOrders createdAt updatedAt'
+        . ' defaultAddress { ' . self::ADDRESS_BODY . ' }';
 
     /**
+     * Fetch a customer. Pass `$withAddresses` to include the full address list
+     * (otherwise just `defaultAddress` comes back).
+     *
      * @return array<string,mixed>|null
      */
-    public function get(string $id): ?array
+    public function get(string $id, bool $withAddresses = false): ?array
     {
-        $query = 'query ($id: ID!) { customer(id: $id) { ' . self::FIELDS . ' } }';
+        $query = 'query ($id: ID!) { customer(id: $id) { ' . self::selection($withAddresses) . ' } }';
 
         return $this->gql->execute($query, ['id' => Gid::customer($id)])['customer'] ?? null;
     }
 
     /**
      * One page of a customer search (`$query` is Shopify syntax, e.g.
-     * `email:jane@example.com` or `tag:vip`).
+     * `email:jane@example.com` or `tag:vip`). Pass `$withAddresses` to include
+     * each customer's full address list.
      *
      * @return array{nodes:list<array<string,mixed>>,pageInfo:array<string,mixed>}
      */
-    public function search(string $query = '', int $first = 50, ?string $after = null): array
+    public function search(string $query = '', int $first = 50, ?string $after = null, bool $withAddresses = false): array
     {
         $first = max(1, min($first, self::MAX_PAGE_SIZE));
-        $data  = $this->gql->execute(self::listQuery(), ['first' => $first, 'after' => $after, 'query' => $query]);
+        $data  = $this->gql->execute(self::listQuery($withAddresses), ['first' => $first, 'after' => $after, 'query' => $query]);
 
         return $data['customers'] ?? ['nodes' => [], 'pageInfo' => ['hasNextPage' => false, 'endCursor' => null]];
     }
@@ -43,9 +50,9 @@ final class Customers extends AbstractResource
     /**
      * @return list<array<string,mixed>>
      */
-    public function searchAll(string $query = '', int $pageSize = self::MAX_PAGE_SIZE): array
+    public function searchAll(string $query = '', int $pageSize = self::MAX_PAGE_SIZE, bool $withAddresses = false): array
     {
-        return $this->paginateNodes(self::listQuery(), ['query' => $query], 'customers', $pageSize);
+        return $this->paginateNodes(self::listQuery($withAddresses), ['query' => $query], 'customers', $pageSize);
     }
 
     /**
@@ -158,10 +165,15 @@ final class Customers extends AbstractResource
         ])['customerAddressDelete'] ?? ['deletedAddressId' => null, 'userErrors' => []];
     }
 
-    private static function listQuery(): string
+    private static function selection(bool $withAddresses): string
+    {
+        return self::FIELDS . ($withAddresses ? ' addresses(first: 50) { ' . self::ADDRESS_BODY . ' }' : '');
+    }
+
+    private static function listQuery(bool $withAddresses): string
     {
         return 'query ($first: Int!, $after: String, $query: String) {'
             . ' customers(first: $first, after: $after, query: $query) {'
-            . ' nodes { ' . self::FIELDS . ' } pageInfo { hasNextPage endCursor } } }';
+            . ' nodes { ' . self::selection($withAddresses) . ' } pageInfo { hasNextPage endCursor } } }';
     }
 }

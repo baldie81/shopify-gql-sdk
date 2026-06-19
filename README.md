@@ -379,9 +379,13 @@ $shopify->customers()->addAddress($res['customer']['id'],
     Address::make()->address1('500 Congress Ave')->city('Austin')->provinceCode('TX')->zip('78701')->countryCode('US'),
     setAsDefault: true,
 );
-$shopify->customers()->addresses($customerId);                 // list
+$shopify->customers()->addresses($customerId);                 // list a customer's addresses
 $shopify->customers()->updateAddress($customerId, $addressId, Address::make()->city('Dallas'));
 $shopify->customers()->deleteAddress($customerId, $addressId);
+
+// Reads include `defaultAddress` cheaply; pass withAddresses for the full list:
+$shopify->customers()->get($customerId, withAddresses: true);          // -> customer.addresses[]
+$shopify->customers()->searchAll('tag:vip', withAddresses: true);
 ```
 
 Orders aren't *created* via the API here (that's checkout / draft orders) — the

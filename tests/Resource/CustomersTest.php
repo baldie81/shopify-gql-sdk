@@ -24,6 +24,31 @@ final class CustomersTest extends MockClientTestCase
         self::assertSame('gid://shopify/Customer/5', $this->body()['variables']['id']);
     }
 
+    public function testGetIncludesDefaultAddressButNotFullListByDefault(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['customer' => ['id' => 'gid://shopify/Customer/5']],
+        ]))]);
+
+        $client->customers()->get('5');
+
+        $query = $this->body()['query'];
+        self::assertStringContainsString('defaultAddress', $query);     // cheap, always
+        self::assertStringNotContainsString('addresses(first:', $query); // full list only on request
+    }
+
+    public function testGetWithAddressesPullsFullList(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['customer' => ['id' => 'gid://shopify/Customer/5', 'addresses' => [['id' => 'a1', 'city' => 'Austin']]]],
+        ]))]);
+
+        $customer = $client->customers()->get('5', withAddresses: true);
+
+        self::assertSame('Austin', $customer['addresses'][0]['city']);
+        self::assertStringContainsString('addresses(first:', $this->body()['query']);
+    }
+
     public function testCreateSendsCustomerInput(): void
     {
         $client = $this->mockClient([new Response(200, [], (string) json_encode([
