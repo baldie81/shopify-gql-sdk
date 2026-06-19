@@ -15,6 +15,7 @@ use Baldie81\ShopifyGraphQL\Resource\FulfillmentOrders;
 use Baldie81\ShopifyGraphQL\Resource\Inventory;
 use Baldie81\ShopifyGraphQL\Resource\MetafieldDefinitions;
 use Baldie81\ShopifyGraphQL\Resource\Orders;
+use Baldie81\ShopifyGraphQL\Resource\PriceLists;
 use Baldie81\ShopifyGraphQL\Resource\Products;
 use Baldie81\ShopifyGraphQL\Resource\Translations;
 use Baldie81\ShopifyGraphQL\Resource\Variants;
@@ -42,6 +43,7 @@ final class ShopifyClient
     private ?Orders $orders = null;
     private ?Collections $collections = null;
     private ?FulfillmentOrders $fulfillmentOrders = null;
+    private ?PriceLists $priceLists = null;
 
     public function __construct(
         private readonly GraphQLClient $gql,
@@ -135,5 +137,10 @@ final class ShopifyClient
     public function fulfillmentOrders(): FulfillmentOrders
     {
         return $this->fulfillmentOrders ??= new FulfillmentOrders($this->gql);
+    }
+
+    public function priceLists(): PriceLists
+    {
+        return $this->priceLists ??= new PriceLists($this->gql);
     }
 }
