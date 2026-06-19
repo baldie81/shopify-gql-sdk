@@ -143,4 +143,63 @@ final class ProductsSyncMediaTest extends MockClientTestCase
         self::assertSame(['solo.jpg'], $result['created']);
         self::assertCount(2, $this->history); // media lookup + create, no reorder for a single image
     }
+
+    public function testDeleteMedia(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['productDeleteMedia' => [
+                'deletedMediaIds'        => ['gid://shopify/MediaImage/1'],
+                'deletedProductImageIds' => [],
+                'mediaUserErrors'        => [],
+            ]],
+        ]))]);
+
+        $result = $client->products()->deleteMedia('55', ['gid://shopify/MediaImage/1']);
+
+        self::assertSame(['gid://shopify/MediaImage/1'], $result['deletedMediaIds']);
+        $vars = $this->body()['variables'];
+        self::assertSame('gid://shopify/Product/55', $vars['productId']);
+        self::assertSame(['gid://shopify/MediaImage/1'], $vars['mediaIds']);
+    }
+
+    public function testSyncMediaPruneDeletesOrphanedMedia(): void
+    {
+        $client = $this->mockClient([
+            new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
+                ['id' => 'gid://shopify/MediaImage/OLD', 'alt' => 'image_1.jpg'],   // orphan (renamed away)
+                ['id' => 'gid://shopify/MediaImage/KEEP', 'alt' => 'SDK_1.jpg'],     // matches incoming
+            ]]]]])),
+            new Response(200, [], (string) json_encode(['data' => ['fileUpdate' => [
+                'files' => [['id' => 'gid://shopify/MediaImage/KEEP', 'alt' => 'SDK_1.jpg']], 'userErrors' => [],
+            ]]])),
+            new Response(200, [], (string) json_encode(['data' => ['productDeleteMedia' => [
+                'deletedMediaIds' => ['gid://shopify/MediaImage/OLD'], 'deletedProductImageIds' => [], 'mediaUserErrors' => [],
+            ]]])),
+        ]);
+
+        $result = $client->products()->syncMedia('55', [MediaSlot::url(1, 'https://cdn.example.com/SDK_1.jpg')], prune: true);
+
+        self::assertSame(['SDK_1.jpg'], $result['replaced']);
+        self::assertSame(['gid://shopify/MediaImage/OLD'], $result['pruned']);
+        self::assertCount(3, $this->history); // media lookup + fileUpdate + productDeleteMedia
+        self::assertSame(['gid://shopify/MediaImage/OLD'], $this->body(2)['variables']['mediaIds']);
+    }
+
+    public function testSyncMediaWithoutPruneLeavesOrphans(): void
+    {
+        $client = $this->mockClient([
+            new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
+                ['id' => 'gid://shopify/MediaImage/OLD', 'alt' => 'image_1.jpg'],
+                ['id' => 'gid://shopify/MediaImage/KEEP', 'alt' => 'SDK_1.jpg'],
+            ]]]]])),
+            new Response(200, [], (string) json_encode(['data' => ['fileUpdate' => [
+                'files' => [['id' => 'gid://shopify/MediaImage/KEEP']], 'userErrors' => [],
+            ]]])),
+        ]);
+
+        $result = $client->products()->syncMedia('55', [MediaSlot::url(1, 'https://cdn.example.com/SDK_1.jpg')]);
+
+        self::assertSame([], $result['pruned']);
+        self::assertCount(2, $this->history); // no productDeleteMedia call
+    }
 }

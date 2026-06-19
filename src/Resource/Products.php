@@ -362,6 +362,28 @@ final class Products extends AbstractResource
     }
 
     /**
+     * Detach media from a product (`productDeleteMedia`). Returns the deleted
+     * media ids and any errors.
+     *
+     * @param list<string> $mediaIds
+     * @return array{deletedMediaIds:list<string>,mediaUserErrors:list<array<string,mixed>>}
+     */
+    public function deleteMedia(string $id, array $mediaIds): array
+    {
+        if ($mediaIds === []) {
+            return ['deletedMediaIds' => [], 'mediaUserErrors' => []];
+        }
+
+        $mutation = 'mutation ($productId: ID!, $mediaIds: [ID!]!) {'
+            . ' productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {'
+            . ' deletedMediaIds deletedProductImageIds mediaUserErrors { field message code } } }';
+
+        $data = $this->gql->execute($mutation, ['productId' => Gid::product($id), 'mediaIds' => array_values($mediaIds)]);
+
+        return $data['productDeleteMedia'] ?? ['deletedMediaIds' => [], 'mediaUserErrors' => []];
+    }
+
+    /**
      * Synchronise a product's images to the given ordered slots, idempotently:
      * for each slot, upload the local file (or use its URL), then **replace** the
      * existing media if one already carries the slot's key (its `alt`) — so a
@@ -372,10 +394,14 @@ final class Products extends AbstractResource
      * {@see \Baldie81\ShopifyGraphQL\Support\MediaFolder::scan()} and
      * {@see findIdBySku()}.
      *
+     * With `$prune` true it becomes a *mirror*: existing keyed media (those with an
+     * `alt`) whose key isn't in `$slots` are deleted, so the product ends up with
+     * exactly the supplied set. Media without an `alt` are left untouched.
+     *
      * @param list<MediaSlot> $slots
-     * @return array{media:list<array{key:string,id:string,action:string}>,created:list<string>,replaced:list<string>,orderedIds:list<string>,reorder:array<string,mixed>,userErrors:list<array<string,mixed>>}
+     * @return array{media:list<array{key:string,id:string,action:string}>,created:list<string>,replaced:list<string>,pruned:list<string>,orderedIds:list<string>,reorder:array<string,mixed>,userErrors:list<array<string,mixed>>}
      */
-    public function syncMedia(string $id, array $slots): array
+    public function syncMedia(string $id, array $slots, bool $prune = false): array
     {
         $gid   = Gid::product($id);
         $files = new Files($this->gql);
@@ -471,10 +497,33 @@ final class Products extends AbstractResource
             }
         }
 
+        // Mirror mode: delete keyed media that the slots didn't cover.
+        $pruned = [];
+        if ($prune) {
+            $incoming  = [];
+            foreach ($slots as $slot) {
+                $incoming[$slot->key()] = true;
+            }
+            $orphanIds = [];
+            foreach ($existing as $key => $mediaId) {
+                if ($mediaId !== '' && !isset($incoming[$key])) {
+                    $orphanIds[] = $mediaId;
+                }
+            }
+            if ($orphanIds !== []) {
+                $deleted = $this->deleteMedia($gid, $orphanIds);
+                $pruned  = $deleted['deletedMediaIds'] ?? [];
+                foreach ($deleted['mediaUserErrors'] ?? [] as $error) {
+                    $userErrors[] = $error;
+                }
+            }
+        }
+
         return [
             'media'      => $media,      // list of { key, id (gid), action } in final order
             'created'    => $created,    // keys created
             'replaced'   => $replaced,   // keys replaced
+            'pruned'     => $pruned,     // media gids deleted (prune mode)
             'orderedIds' => $orderedIds, // media gids in final order
             'reorder'    => $reorder,    // { job: { id, done }, mediaUserErrors }
             'userErrors' => $userErrors, // aggregated, for logging

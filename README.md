@@ -146,7 +146,7 @@ foreach (MediaFolder::scan('/ftp/incoming') as $sku => $slots) {
         continue; // unknown SKU
     }
     $result = $shopify->products()->syncMedia($productId, $slots);
-    // ['created' => [...], 'replaced' => [...], 'orderedIds' => [...], 'reorder' => ..., 'userErrors' => []]
+    // ['media' => [{key,id,action}], 'created'=>[...], 'replaced'=>[...], 'pruned'=>[...], 'orderedIds'=>[...], 'reorder'=>..., 'userErrors'=>[]]
 }
 ```
 
@@ -158,8 +158,20 @@ For each slot `syncMedia()`:
 3. **reorders** all touched media so positions match (`_1` → first, `_2` → second…).
 
 So re-dropping `ACME-1_1.jpg` with new content swaps that one image and keeps the
-order, instead of piling up duplicates. The low-level pieces are available too:
-`files()->upload($path)`, `files()->update([...])`, and `products()->reorderMedia($id, $orderedIds)`.
+order, instead of piling up duplicates.
+
+By default it's additive (it never removes media you didn't list). Pass
+**`prune: true`** to make it a *mirror* — keyed media not in the new set are deleted
+so the product ends up with exactly the supplied images (handy after renames):
+
+```php
+$shopify->products()->syncMedia($productId, $slots, prune: true);
+// $result['pruned'] === the media gids that were removed
+```
+
+The low-level pieces are available too: `files()->upload($path)`,
+`files()->update([...])`, `products()->reorderMedia($id, $orderedIds)`, and
+`products()->deleteMedia($id, $mediaIds)`.
 
 ## Bulk operations
 
@@ -278,8 +290,8 @@ than just a success flag:
 | `create()` / `update()` | `product` (incl. `id` GID and `legacyResourceId` numeric id), `userErrors`, and `translations` when fields carried any |
 | `get()` / `search*()` | product nodes with `id` + `legacyResourceId` + timestamps |
 | `setMetafields()` | `metafields` (`id` GID, `legacyResourceId`, `namespace/key/type/value`, timestamps), `userErrors` |
-| `syncMedia()` | `media` (`{ key, id (GID), action }` per slot), `created`/`replaced`, `orderedIds`, `reorder.job`, aggregated `userErrors` |
-| `addMedia()` / `ensureMedia()` | media nodes with `id`, plus `mediaUserErrors` |
+| `syncMedia()` | `media` (`{ key, id (GID), action }` per slot), `created`/`replaced`/`pruned`, `orderedIds`, `reorder.job`, aggregated `userErrors` |
+| `addMedia()` / `ensureMedia()` / `deleteMedia()` | media nodes / `deletedMediaIds` with `id`s, plus `mediaUserErrors` |
 | `setTranslations()` / `translations()->set()/register()` | `translations` (each with `translatableContentDigest`), the `digests` map, `userErrors`, `skipped` |
 | `bulkOperations()` | `bulkOperation` (`id`, `status`, `url`, `objectCount`, …), `userErrors` |
 | `files()->upload()` | the `resourceUrl`; `update()` returns files + `userErrors` |
