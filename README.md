@@ -19,6 +19,13 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Resource\Customers`** — get / search / create / update, plus metafields.
 - **`Resource\Orders`** — read/search, fulfillment, refunds, and metafields
   (e.g. writing ERP sync state back onto the order).
+- **`Resource\FulfillmentOrders`** — the fulfillment-order lifecycle beneath
+  `orders()->fulfill()`: holds, moves, close/cancel/open/reschedule, merge/split,
+  and the 3PL request flow (submit/accept/reject fulfillment + cancellation).
+- **`Resource\Collections`** — manual & smart collections, product membership
+  (`addProducts` sync; `removeProducts`/`reorderProducts` async jobs), metafields.
+- **`Resource\PriceLists`** — contextual/market/B2B pricing: price lists plus
+  fixed-price management (`setPrices`/`updatePrices`/`deletePrices`).
 - **`Resource\BulkOperations`** — bulk query, and `importMutation()` (JSONL +
   `BULK_MUTATION_VARIABLES` staged upload), poll, read the JSONL.
 - **`Resource\Translations`** — translate any resource (products, metafields…),
@@ -31,6 +38,7 @@ REST Admin API, so this is GraphQL-only from the start.
   `ProductUpdateInput`, incl. inline metafields (write methods accept `builder|array`).
 - **`Support\VariantInput`** — fluent builder for variant updates (price / compareAtPrice / sku / tracked).
 - **`Support\CustomerInput`** / **`Support\Address`** — builders for customers and mailing addresses.
+- **`Support\CollectionInput`** / **`Support\PriceListInput`** — builders for collections and price lists.
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
 - **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
 - **`Support\MediaEntry` / `Support\MediaFolder`** — positioned media + parsing a
@@ -470,8 +478,7 @@ Unit tests mock Guzzle (no network). The live check is `examples/products_smoke_
 
 ## Not yet in the spike
 
-Collections, draft orders (order *creation*), fulfillment-order management,
-caller-supplied selection sets, and contextual/market pricing (price lists).
+Draft orders (order *creation*) and caller-supplied selection sets.
 
 ## License
 
