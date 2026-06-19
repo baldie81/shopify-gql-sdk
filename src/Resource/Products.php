@@ -198,28 +198,7 @@ final class Products extends AbstractResource
      */
     public function setMetafields(string $id, array $metafields): array
     {
-        $ownerId  = Gid::product($id);
-        $mutation = 'mutation ($metafields: [MetafieldsSetInput!]!) {'
-            . ' metafieldsSet(metafields: $metafields) {'
-            . ' metafields { id legacyResourceId namespace key type value createdAt updatedAt } userErrors { field message code } } }';
-
-        $inputs = [];
-        foreach ($this->payloads($metafields) as $metafield) {
-            $inputs[] = ['ownerId' => $ownerId] + $metafield;
-        }
-
-        $merged = ['metafields' => [], 'userErrors' => []];
-        foreach (array_chunk($inputs, 25) as $chunk) {
-            $result = $this->gql->execute($mutation, ['metafields' => $chunk])['metafieldsSet'] ?? [];
-            foreach ($result['metafields'] ?? [] as $metafield) {
-                $merged['metafields'][] = $metafield;
-            }
-            foreach ($result['userErrors'] ?? [] as $error) {
-                $merged['userErrors'][] = $error;
-            }
-        }
-
-        return $merged;
+        return $this->setMetafieldsFor(Gid::product($id), $metafields);
     }
 
     /**

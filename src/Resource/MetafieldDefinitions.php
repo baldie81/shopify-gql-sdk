@@ -39,19 +39,46 @@ final class MetafieldDefinitions extends AbstractResource
     }
 
     /**
-     * Convenience for a product-owned definition.
+     * Define a metafield for a given owner type (`PRODUCT`, `ORDER`, `CUSTOMER`, …).
      *
      * @param array<string,mixed> $extra extra MetafieldDefinitionInput fields (e.g. `description`, `validations`)
      * @return array{definition:?array<string,mixed>,userErrors:list<array<string,mixed>>}
      */
-    public function defineProduct(string $namespace, string $key, MetafieldType|string $type, string $name, array $extra = []): array
+    public function define(string $ownerType, string $namespace, string $key, MetafieldType|string $type, string $name, array $extra = []): array
     {
         return $this->create([
-            'ownerType' => 'PRODUCT',
+            'ownerType' => $ownerType,
             'namespace' => $namespace,
             'key'       => $key,
             'type'      => $type instanceof MetafieldType ? $type->value : $type,
             'name'      => $name,
         ] + $extra);
+    }
+
+    /**
+     * @param array<string,mixed> $extra
+     * @return array{definition:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     */
+    public function defineProduct(string $namespace, string $key, MetafieldType|string $type, string $name, array $extra = []): array
+    {
+        return $this->define('PRODUCT', $namespace, $key, $type, $name, $extra);
+    }
+
+    /**
+     * @param array<string,mixed> $extra
+     * @return array{definition:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     */
+    public function defineOrder(string $namespace, string $key, MetafieldType|string $type, string $name, array $extra = []): array
+    {
+        return $this->define('ORDER', $namespace, $key, $type, $name, $extra);
+    }
+
+    /**
+     * @param array<string,mixed> $extra
+     * @return array{definition:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     */
+    public function defineCustomer(string $namespace, string $key, MetafieldType|string $type, string $name, array $extra = []): array
+    {
+        return $this->define('CUSTOMER', $namespace, $key, $type, $name, $extra);
     }
 }

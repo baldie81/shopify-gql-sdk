@@ -22,6 +22,9 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Resource\Variants`** — list / create / update / delete variants
   (`price`, `compareAtPrice`, sku, tracked) via the bulk variant mutations.
 - **`Resource\Inventory`** — locations, and set/adjust/activate quantities.
+- **`Resource\Customers`** — get / search / create / update, plus metafields.
+- **`Resource\Orders`** — read/search, fulfillment, refunds, and metafields
+  (e.g. writing ERP sync state back onto the order).
 - **`Resource\BulkOperations`** — bulk query, and `importMutation()` (JSONL +
   `BULK_MUTATION_VARIABLES` staged upload), poll, read the JSONL.
 - **`Resource\Translations`** — translate any resource (products, metafields…),
@@ -33,6 +36,7 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Support\ProductInput`** — fluent `Arrayable` builder for `ProductCreateInput` /
   `ProductUpdateInput`, incl. inline metafields (write methods accept `builder|array`).
 - **`Support\VariantInput`** — fluent builder for variant updates (price / compareAtPrice / sku / tracked).
+- **`Support\CustomerInput`** — fluent builder for customerCreate / customerUpdate.
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
 - **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
 - **`Support\MediaEntry` / `Support\MediaFolder`** — positioned media + parsing a
@@ -355,6 +359,46 @@ $shopify->translations()->register($gid, [
 $shopify->translations()->remove($gid, [ProductTranslatableField::Title], ['fr']);
 ```
 
+## Customers & orders
+
+```php
+use Baldie81\ShopifyGraphQL\Support\CustomerInput;
+use Baldie81\ShopifyGraphQL\Support\Metafield;
+
+// Customers — get / search / create / update (+ metafields, e.g. an ERP id).
+$res = $shopify->customers()->create(
+    CustomerInput::make('jane@example.com')->firstName('Jane')->lastName('Doe')->tags(['vip'])
+);
+$shopify->customers()->setMetafields($res['customer']['id'], [Metafield::text('erp', 'customer_id', 'C-1')]);
+$shopify->customers()->searchAll('tag:vip');
+```
+
+Orders aren't *created* via the API here (that's checkout / draft orders) — the
+resource covers **read, fulfillment, refunds**, and writing state back onto the order:
+
+```php
+$order = $shopify->orders()->get($orderId);                  // financial/fulfillment status, totals, customer
+$shopify->orders()->searchAll('financial_status:paid');
+
+// Fulfill all open fulfillment orders, with tracking:
+$shopify->orders()->fulfill($orderId, ['number' => '1Z999', 'company' => 'UPS'], notifyCustomer: true);
+
+// Refund (RefundInput body; orderId injected):
+$shopify->orders()->refund($orderId, [
+    'note' => 'Damaged', 'refundLineItems' => [['lineItemId' => $lineItemId, 'quantity' => 1]],
+]);
+
+// Write ERP integration state back onto the order (id, success flag, message):
+$shopify->orders()->setMetafields($orderId, [
+    Metafield::text('erp', 'order_id', 'SO-1001'),
+    Metafield::boolean('erp', 'synced', true),
+    Metafield::text('erp', 'message', 'Sent to ERP OK'),
+]);
+```
+
+Metafield **definitions** for these owners: `metafieldDefinitions()->defineOrder(...)`
+and `defineCustomer(...)` (alongside `defineProduct(...)`).
+
 ## Return data (built for persistence)
 
 Every write method returns the identifiers and errors you'd want to store, rather
@@ -409,9 +453,8 @@ Unit tests mock Guzzle (no network). The live check is `examples/products_smoke_
 
 ## Not yet in the spike
 
-Other resources (orders, customers…), caller-supplied selection sets, and
-contextual/market pricing (price lists). The Products slice is the template the
-rest follows.
+Collections, draft orders (order *creation*), fulfillment-order management,
+caller-supplied selection sets, and contextual/market pricing (price lists).
 
 ## License
 

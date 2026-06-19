@@ -47,6 +47,39 @@ abstract class AbstractResource
     }
 
     /**
+     * Set (create-or-update) metafields on any owner GID via `metafieldsSet`
+     * (upsert by owner+namespace+key), chunked to Shopify's 25-per-call limit.
+     * Resources expose `setMetafields($id, …)` wrappers that pass the right GID.
+     *
+     * @param list<\Baldie81\ShopifyGraphQL\Support\Metafield|array<string,mixed>> $metafields
+     * @return array{metafields:list<array<string,mixed>>,userErrors:list<array<string,mixed>>}
+     */
+    protected function setMetafieldsFor(string $ownerId, array $metafields): array
+    {
+        $mutation = 'mutation ($metafields: [MetafieldsSetInput!]!) {'
+            . ' metafieldsSet(metafields: $metafields) {'
+            . ' metafields { id legacyResourceId namespace key type value createdAt updatedAt } userErrors { field message code } } }';
+
+        $inputs = [];
+        foreach ($this->payloads($metafields) as $metafield) {
+            $inputs[] = ['ownerId' => $ownerId] + $metafield;
+        }
+
+        $merged = ['metafields' => [], 'userErrors' => []];
+        foreach (array_chunk($inputs, 25) as $chunk) {
+            $result = $this->gql->execute($mutation, ['metafields' => $chunk])['metafieldsSet'] ?? [];
+            foreach ($result['metafields'] ?? [] as $metafield) {
+                $merged['metafields'][] = $metafield;
+            }
+            foreach ($result['userErrors'] ?? [] as $error) {
+                $merged['userErrors'][] = $error;
+            }
+        }
+
+        return $merged;
+    }
+
+    /**
      * Walk a top-level Relay connection by cursor and return the merged `nodes`.
      *
      * The query must accept `$first: Int!` and `$after: String` and select

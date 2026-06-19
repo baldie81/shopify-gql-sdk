@@ -8,9 +8,11 @@ use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\ClientInterface;
 use Baldie81\ShopifyGraphQL\GraphQL\Client as GraphQLClient;
 use Baldie81\ShopifyGraphQL\Resource\BulkOperations;
+use Baldie81\ShopifyGraphQL\Resource\Customers;
 use Baldie81\ShopifyGraphQL\Resource\Files;
 use Baldie81\ShopifyGraphQL\Resource\Inventory;
 use Baldie81\ShopifyGraphQL\Resource\MetafieldDefinitions;
+use Baldie81\ShopifyGraphQL\Resource\Orders;
 use Baldie81\ShopifyGraphQL\Resource\Products;
 use Baldie81\ShopifyGraphQL\Resource\Translations;
 use Baldie81\ShopifyGraphQL\Resource\Variants;
@@ -34,6 +36,8 @@ final class ShopifyClient
     private ?MetafieldDefinitions $metafieldDefinitions = null;
     private ?Variants $variants = null;
     private ?Inventory $inventory = null;
+    private ?Customers $customers = null;
+    private ?Orders $orders = null;
 
     public function __construct(
         private readonly GraphQLClient $gql,
@@ -107,5 +111,15 @@ final class ShopifyClient
     public function inventory(): Inventory
     {
         return $this->inventory ??= new Inventory($this->gql);
+    }
+
+    public function customers(): Customers
+    {
+        return $this->customers ??= new Customers($this->gql);
+    }
+
+    public function orders(): Orders
+    {
+        return $this->orders ??= new Orders($this->gql);
     }
 }
