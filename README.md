@@ -4,12 +4,6 @@ A small, **framework-independent** PHP client for the Shopify **Admin GraphQL**
 API. No framework coupling — just PHP 8.4+ and Guzzle. Shopify is deprecating the
 REST Admin API, so this is GraphQL-only from the start.
 
-> **Status: spike.** This is a deliberately narrow vertical slice — **Products**
-> only (get / search / searchAll / create / update) — built to validate the
-> conventions (transport, selection sets, cursor pagination, the three error
-> layers, GIDs, throttling) before widening the surface. It mirrors the patterns
-> of the companion `baldie81/magento2-sdk` package, adapted for GraphQL.
-
 ## What's here
 
 - **`ShopifyClient`** — entry point, lazy resource sub-clients (`products()`).
@@ -44,9 +38,9 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Support\Translation`** — `TranslationInput` builder (digest optional).
 - **`Support\ProductField`** — fluent per-field translations (`title()->withTranslation(...)`).
 - **`Support\Gid`** — global-ID helpers (`gid://shopify/Product/123`).
-- **Enums** — `ProductStatus`, `MetafieldType`, `MediaContentType`,
+- **`Enums`** — `ProductStatus`, `MetafieldType`, `MediaContentType`,
   `BulkOperationStatus`, `ProductTranslatableField`.
-- **Exceptions** — `GraphQLException` (top-level errors / non-2xx), `ThrottledException`
+- **`Exceptions`** — `GraphQLException` (top-level errors / non-2xx), `ThrottledException`
   (cost-limit / 429), `TransportException`, under a `ShopifyException` base.
 
 ## Quick start
