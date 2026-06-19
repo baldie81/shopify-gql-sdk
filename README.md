@@ -17,7 +17,11 @@ REST Admin API, so this is GraphQL-only from the start.
   decodes `{data, errors, extensions}`, normalises errors, and **backs off + retries
   on `THROTTLED`** using Shopify's calculated query-cost block.
 - **`Resource\Products`** — queries/mutations with a lean default selection set,
-  plus metafields (`setMetafields`) and idempotent media (`ensureMedia`).
+  plus metafields (`setMetafields`), idempotent media (`ensureMedia`), `set()`
+  (productSet — options + variants in one call) and `delete()`.
+- **`Resource\Variants`** — list / create / update / delete variants
+  (`price`, `compareAtPrice`, sku, tracked) via the bulk variant mutations.
+- **`Resource\Inventory`** — locations, and set/adjust/activate quantities.
 - **`Resource\BulkOperations`** — bulk query, and `importMutation()` (JSONL +
   `BULK_MUTATION_VARIABLES` staged upload), poll, read the JSONL.
 - **`Resource\Translations`** — translate any resource (products, metafields…),
@@ -28,6 +32,7 @@ REST Admin API, so this is GraphQL-only from the start.
   (the admin-visible, structured declarations) via `metafieldDefinitionCreate`.
 - **`Support\ProductInput`** — fluent `Arrayable` builder for `ProductCreateInput` /
   `ProductUpdateInput`, incl. inline metafields (write methods accept `builder|array`).
+- **`Support\VariantInput`** — fluent builder for variant updates (price / compareAtPrice / sku / tracked).
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
 - **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
 - **`Support\MediaEntry` / `Support\MediaFolder`** — positioned media + parsing a
@@ -190,6 +195,43 @@ The low-level pieces are available too: `files()->upload($path)`,
 `files()->update([...])`, `products()->reorderMedia($id, $orderedIds)`, and
 `products()->deleteMedia($id, $mediaIds)`.
 
+## Variants, prices & inventory
+
+Prices and SKUs live on the **variant**, and stock lives on the variant's
+**inventory item** at a **location** — so they're handled by `variants()` and
+`inventory()`, not the product directly.
+
+```php
+use Baldie81\ShopifyGraphQL\Support\VariantInput;
+
+// Create a product WITH options + variants in one call (productSet):
+$shopify->products()->set([
+    'title'          => 'Classic Tee',
+    'productOptions' => [['name' => 'Color', 'values' => [['name' => 'Red'], ['name' => 'Blue']]]],
+    'variants'       => [
+        ['optionValues' => [['optionName' => 'Color', 'name' => 'Red']],  'price' => '19.90', 'inventoryItem' => ['sku' => 'TEE-RED']],
+        ['optionValues' => [['optionName' => 'Color', 'name' => 'Blue']], 'price' => '19.90', 'inventoryItem' => ['sku' => 'TEE-BLUE']],
+    ],
+]);
+
+// Prices: read variants, then set price / compareAtPrice and enable tracking.
+$variants = $shopify->variants()->list($productId);   // id, sku, price, compareAtPrice, inventoryItem { id, tracked }
+$shopify->variants()->update($productId, [
+    VariantInput::make($variants[0]['id'])->price(17.50)->compareAtPrice(24.00)->tracked(),
+]);
+
+// Inventory: pick a location, then set absolute quantities (or adjust by delta).
+$location = $shopify->inventory()->locations()[0]['id'];
+$shopify->inventory()->setQuantities([
+    ['inventoryItemId' => $variants[0]['inventoryItem']['id'], 'locationId' => $location, 'quantity' => 100],
+]);
+// also: adjustQuantities([... 'delta' => -5 ...]) and activate($inventoryItemId, $location, 100)
+```
+
+An inventory item must be **tracked** (`VariantInput::tracked()`) and stocked at the
+location before a quantity sticks — `setQuantities()` works once stocked; `activate()`
+stocks it if not.
+
 ## Bulk operations
 
 Run a query (export) or mutation (import) that Shopify processes asynchronously and
@@ -351,9 +393,9 @@ Unit tests mock Guzzle (no network). The live check is `examples/products_smoke_
 
 ## Not yet in the spike
 
-Other resources (orders, customers, inventory…), caller-supplied selection sets,
-`productDelete`, and variants (`productVariantsBulkCreate`). The Products slice is
-the template the rest follows.
+Other resources (orders, customers…), caller-supplied selection sets, and
+contextual/market pricing (price lists). The Products slice is the template the
+rest follows.
 
 ## License
 

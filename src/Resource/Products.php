@@ -124,6 +124,39 @@ final class Products extends AbstractResource
     }
 
     /**
+     * Declaratively create or update a product from a full `ProductSetInput` —
+     * the way to create a product *with options and variants* in one call.
+     * Pass the raw input array (options as `productOptions`, variants with
+     * `optionValues`/`price`/`inventoryItem.sku`). Returns `{ product, userErrors }`.
+     *
+     * @param array<string,mixed> $input a ProductSetInput
+     * @return array{product:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     */
+    public function set(array $input): array
+    {
+        $mutation = 'mutation ($input: ProductSetInput!) {'
+            . ' productSet(input: $input) {'
+            . ' product { ' . self::FIELDS . ' options { name optionValues { name } }'
+            . ' variants(first: 100) { nodes { id sku price } } } userErrors { field message } } }';
+
+        return $this->gql->execute($mutation, ['input' => $input])['productSet'] ?? ['product' => null, 'userErrors' => []];
+    }
+
+    /**
+     * Delete a product (`productDelete`). Returns the deleted product id.
+     *
+     * @return array{deletedProductId:?string,userErrors:list<array<string,mixed>>}
+     */
+    public function delete(string $id): array
+    {
+        $mutation = 'mutation ($input: ProductDeleteInput!) {'
+            . ' productDelete(input: $input) { deletedProductId userErrors { field message } } }';
+
+        return $this->gql->execute($mutation, ['input' => ['id' => Gid::product($id)]])['productDelete']
+            ?? ['deletedProductId' => null, 'userErrors' => []];
+    }
+
+    /**
      * If the input carried translatable {@see ProductField}s, register their
      * translations against the saved product and attach the result. Translations
      * can't ride in the create/update mutation itself, so this is the

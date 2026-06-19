@@ -9,9 +9,11 @@ use GuzzleHttp\ClientInterface;
 use Baldie81\ShopifyGraphQL\GraphQL\Client as GraphQLClient;
 use Baldie81\ShopifyGraphQL\Resource\BulkOperations;
 use Baldie81\ShopifyGraphQL\Resource\Files;
+use Baldie81\ShopifyGraphQL\Resource\Inventory;
 use Baldie81\ShopifyGraphQL\Resource\MetafieldDefinitions;
 use Baldie81\ShopifyGraphQL\Resource\Products;
 use Baldie81\ShopifyGraphQL\Resource\Translations;
+use Baldie81\ShopifyGraphQL\Resource\Variants;
 
 /**
  * Entry point for the SDK. Exposes the Shopify Admin GraphQL resources as
@@ -30,6 +32,8 @@ final class ShopifyClient
     private ?Translations $translations = null;
     private ?Files $files = null;
     private ?MetafieldDefinitions $metafieldDefinitions = null;
+    private ?Variants $variants = null;
+    private ?Inventory $inventory = null;
 
     public function __construct(
         private readonly GraphQLClient $gql,
@@ -93,5 +97,15 @@ final class ShopifyClient
     public function metafieldDefinitions(): MetafieldDefinitions
     {
         return $this->metafieldDefinitions ??= new MetafieldDefinitions($this->gql);
+    }
+
+    public function variants(): Variants
+    {
+        return $this->variants ??= new Variants($this->gql);
+    }
+
+    public function inventory(): Inventory
+    {
+        return $this->inventory ??= new Inventory($this->gql);
     }
 }
