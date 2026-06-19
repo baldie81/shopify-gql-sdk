@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Baldie81\ShopifyGraphQL\Resource;
 
+use GuzzleHttp\Client as GuzzleClient;
+use GuzzleHttp\ClientInterface;
 use Baldie81\ShopifyGraphQL\Enum\BulkOperationStatus;
+use Baldie81\ShopifyGraphQL\Exception\TransportException;
 use Baldie81\ShopifyGraphQL\GraphQL\Client;
 
 /**
@@ -26,11 +29,57 @@ final class BulkOperations extends AbstractResource
 
     private readonly Files $files;
 
-    public function __construct(Client $gql, ?callable $sleeper = null, ?Files $files = null)
+    private readonly ClientInterface $downloader;
+
+    public function __construct(Client $gql, ?callable $sleeper = null, ?Files $files = null, ?ClientInterface $downloader = null)
     {
         parent::__construct($gql);
-        $this->sleeper = $sleeper ?? static fn (int $microseconds) => usleep($microseconds);
-        $this->files   = $files ?? new Files($gql);
+        $this->sleeper    = $sleeper ?? static fn (int $microseconds) => usleep($microseconds);
+        $this->files      = $files ?? new Files($gql);
+        // Plain client for downloading the result file from external storage.
+        $this->downloader = $downloader ?? new GuzzleClient(['timeout' => 0]);
+    }
+
+    /**
+     * Stream the rows of a completed operation's result JSONL, each decoded to an
+     * array. Reads `url` (or `partialDataUrl` when `$partial` is true); yields
+     * nothing if that url isn't set yet (e.g. not COMPLETED). Streamed, so it
+     * handles large result files without loading them all into memory.
+     *
+     * Each row is the decoded JSON object from one line — for a bulk *mutation*
+     * that's your mutation's payload (so select `id`/`userErrors` to get them).
+     *
+     * @param array<string,mixed> $operation a bulk operation (from {@see get()}/{@see poll()})
+     * @return iterable<array<string,mixed>>
+     */
+    public function results(array $operation, bool $partial = false): iterable
+    {
+        $url = (string) ($operation[$partial ? 'partialDataUrl' : 'url'] ?? '');
+        if ($url === '') {
+            return;
+        }
+
+        try {
+            $body = $this->downloader->request('GET', $url, ['stream' => true])->getBody();
+        } catch (\Throwable $e) {
+            throw new TransportException('Failed to download bulk result: ' . $e->getMessage(), 0, $e);
+        }
+
+        $buffer = '';
+        while (!$body->eof()) {
+            $buffer .= $body->read(65536);
+            while (($newline = strpos($buffer, "\n")) !== false) {
+                $line   = trim(substr($buffer, 0, $newline));
+                $buffer = substr($buffer, $newline + 1);
+                if ($line !== '') {
+                    yield json_decode($line, true);
+                }
+            }
+        }
+        $buffer = trim($buffer);
+        if ($buffer !== '') {
+            yield json_decode($buffer, true);
+        }
     }
 
     /**

@@ -134,6 +134,35 @@ final class BulkOperationsTest extends TestCase
         self::assertCount(1, $upHistory); // single JSONL push
     }
 
+    public function testResultsStreamsDecodedJsonlRows(): void
+    {
+        // gql isn't used by results(); a downloader returns the JSONL file.
+        $gql = new Client(new GuzzleClient([
+            'handler'  => HandlerStack::create(new MockHandler([])),
+            'base_uri' => 'https://t.myshopify.com/admin/api/2025-07/',
+        ]));
+
+        $jsonl = json_encode(['data' => ['productUpdate' => ['product' => ['id' => 'gid://shopify/Product/1'], 'userErrors' => []]]]) . "\n"
+            . json_encode(['data' => ['productUpdate' => ['product' => ['id' => 'gid://shopify/Product/2'], 'userErrors' => [['message' => 'bad']]]]]) . "\n";
+
+        $downloader = new GuzzleClient(['handler' => HandlerStack::create(new MockHandler([new Response(200, [], $jsonl)]))]);
+        $bulk       = new BulkOperations($gql, static fn (int $us) => null, null, $downloader);
+
+        $rows = iterator_to_array($bulk->results(['url' => 'https://gcs.example/result.jsonl']));
+
+        self::assertCount(2, $rows);
+        self::assertSame('gid://shopify/Product/1', $rows[0]['data']['productUpdate']['product']['id']);
+        self::assertSame('bad', $rows[1]['data']['productUpdate']['userErrors'][0]['message']);
+    }
+
+    public function testResultsYieldsNothingWithoutUrl(): void
+    {
+        $gql  = new Client(new GuzzleClient(['handler' => HandlerStack::create(new MockHandler([])), 'base_uri' => 'https://t.myshopify.com/admin/api/2025-07/']));
+        $bulk = new BulkOperations($gql);
+
+        self::assertSame([], iterator_to_array($bulk->results(['status' => 'RUNNING'])));
+    }
+
     public function testCancelReturnsPayload(): void
     {
         $bulk = $this->resource([new Response(200, [], (string) json_encode([

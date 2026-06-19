@@ -242,7 +242,7 @@ cross-product writes, see the bulk-mutation path under "Bulk operations".
 ## Bulk operations
 
 Run a query (export) or mutation (import) that Shopify processes asynchronously and
-returns as a JSONL file. Kick off, poll to a terminal status, then read `url`.
+returns as a JSONL file. Kick off, poll to a terminal status, then stream the rows.
 
 ```php
 $bulk = $shopify->bulkOperations();
@@ -251,8 +251,11 @@ $op = $bulk->runQuery('{ products { edges { node { id title } } } }')['bulkOpera
 $final = $bulk->poll($op['id']);          // waits until COMPLETED/FAILED/CANCELED/EXPIRED
 
 if (($final['status'] ?? null) === 'COMPLETED') {
-    $jsonlUrl = $final['url'];             // download + parse line-by-line
+    foreach ($bulk->results($final) as $row) {   // downloads `url`, yields one decoded line at a time
+        // $row e.g. ['id' => 'gid://shopify/Product/1', 'title' => '…']
+    }
 }
+// on failure: $final['status'] === 'FAILED' with $final['errorCode']; results($final, partial: true) reads partialDataUrl
 
 $bulk->current('QUERY');                  // most recent op of a type
 $bulk->cancel($op['id']);
@@ -271,8 +274,14 @@ $started = $shopify->bulkOperations()->importMutation(
     ],
 );
 $final = $shopify->bulkOperations()->poll($started['bulkOperation']['id']);
+foreach ($shopify->bulkOperations()->results($final) as $row) {
+    // each row is your mutation's payload — select id/userErrors in the mutation to get them here
+}
 // (low level: $bulk->runMutation($mutation, $stagedUploadPath) if you staged the JSONL yourself)
 ```
+
+The result JSONL contains exactly the fields your query/mutation *selected*, so
+include `id` (and `userErrors` for mutations) to get the values to persist/log.
 
 A bulk mutation can't perform per-file byte uploads, so media rows must reference
 already-hosted/staged URLs — for local files use `Products::syncMedia()` instead.
