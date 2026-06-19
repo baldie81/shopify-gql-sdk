@@ -28,7 +28,7 @@ REST Admin API, so this is GraphQL-only from the start.
   `ProductUpdateInput`, incl. inline metafields (write methods accept `builder|array`).
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
 - **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
-- **`Support\MediaSlot` / `Support\MediaFolder`** — positioned media + parsing a
+- **`Support\MediaEntry` / `Support\MediaFolder`** — positioned media + parsing a
   folder of `SKU_1.jpg`, `SKU_2.jpg`, … drops.
 - **`Support\Translation`** — `TranslationInput` builder (digest optional).
 - **`Support\ProductField`** — fluent per-field translations (`title()->withTranslation(...)`).
@@ -151,7 +151,7 @@ foreach (MediaFolder::scan('/ftp/incoming') as $sku => $slots) {
 ```
 
 For each slot `syncMedia()`:
-1. uploads the local file (staged upload) — or uses the URL for `MediaSlot::url()`;
+1. uploads the local file (staged upload) — or uses the URL for `MediaEntry::url()`;
 2. if a media with the same key (`alt`, defaulting to the filename) already exists,
    **replaces its bytes in place via `fileUpdate`** (no duplicate file) — otherwise
    creates it;

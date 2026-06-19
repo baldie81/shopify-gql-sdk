@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace Baldie81\ShopifyGraphQL\Tests\Support;
 
-use Baldie81\ShopifyGraphQL\Support\MediaSlot;
+use Baldie81\ShopifyGraphQL\Support\MediaEntry;
 use PHPUnit\Framework\TestCase;
 
-final class MediaSlotTest extends TestCase
+final class MediaEntryTest extends TestCase
 {
     public function testFileSlotDefaultsKeyToFilename(): void
     {
-        $slot = MediaSlot::file(1, '/ftp/incoming/ACME-1_1.jpg');
+        $slot = MediaEntry::file(1, '/ftp/incoming/ACME-1_1.jpg');
 
         self::assertSame(1, $slot->position());
         self::assertSame('/ftp/incoming/ACME-1_1.jpg', $slot->source());
@@ -21,7 +21,7 @@ final class MediaSlotTest extends TestCase
 
     public function testUrlSlotDerivesKeyFromUrl(): void
     {
-        $slot = MediaSlot::url(2, 'https://cdn.example.com/x/back.jpg?v=9');
+        $slot = MediaEntry::url(2, 'https://cdn.example.com/x/back.jpg?v=9');
 
         self::assertFalse($slot->isLocal());
         self::assertSame('back.jpg', $slot->key());
@@ -29,6 +29,6 @@ final class MediaSlotTest extends TestCase
 
     public function testExplicitKeyOverrides(): void
     {
-        self::assertSame('main', MediaSlot::file(1, '/x/a.jpg', 'main')->key());
+        self::assertSame('main', MediaEntry::file(1, '/x/a.jpg', 'main')->key());
     }
 }

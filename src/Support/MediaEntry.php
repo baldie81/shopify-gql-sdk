@@ -14,10 +14,10 @@ namespace Baldie81\ShopifyGraphQL\Support;
  * duplicated. It defaults to the filename, which suits the `SKU_1.jpg` / `SKU_2.jpg`
  * convention.
  *
- *   MediaSlot::file(1, '/ftp/ACME-1_1.jpg');   // main image, uploaded
- *   MediaSlot::url(2, 'https://cdn/x/back.jpg'); // already hosted
+ *   MediaEntry::file(1, '/ftp/ACME-1_1.jpg');   // main image, uploaded
+ *   MediaEntry::url(2, 'https://cdn/x/back.jpg'); // already hosted
  */
-final class MediaSlot
+final class MediaEntry
 {
     private function __construct(
         private readonly int $position,

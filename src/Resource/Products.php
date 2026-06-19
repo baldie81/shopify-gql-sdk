@@ -6,7 +6,7 @@ namespace Baldie81\ShopifyGraphQL\Resource;
 
 use Baldie81\ShopifyGraphQL\Support\Gid;
 use Baldie81\ShopifyGraphQL\Support\Media;
-use Baldie81\ShopifyGraphQL\Support\MediaSlot;
+use Baldie81\ShopifyGraphQL\Support\MediaEntry;
 use Baldie81\ShopifyGraphQL\Support\Metafield;
 use Baldie81\ShopifyGraphQL\Support\ProductField;
 use Baldie81\ShopifyGraphQL\Support\ProductInput;
@@ -398,7 +398,7 @@ final class Products extends AbstractResource
      * `alt`) whose key isn't in `$slots` are deleted, so the product ends up with
      * exactly the supplied set. Media without an `alt` are left untouched.
      *
-     * @param list<MediaSlot> $slots
+     * @param list<MediaEntry> $slots
      * @return array{media:list<array{key:string,id:string,action:string}>,created:list<string>,replaced:list<string>,pruned:list<string>,orderedIds:list<string>,reorder:array<string,mixed>,userErrors:list<array<string,mixed>>}
      */
     public function syncMedia(string $id, array $slots, bool $prune = false): array
@@ -414,7 +414,7 @@ final class Products extends AbstractResource
             }
         }
 
-        usort($slots, static fn (MediaSlot $a, MediaSlot $b): int => $a->position() <=> $b->position());
+        usort($slots, static fn (MediaEntry $a, MediaEntry $b): int => $a->position() <=> $b->position());
 
         // Resolve every source up front: one stagedUploadsCreate covers all local
         // files (their bytes are still pushed individually).

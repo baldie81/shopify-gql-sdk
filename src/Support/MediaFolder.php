@@ -28,7 +28,7 @@ final class MediaFolder
 
     /**
      * @param list<string> $extensions
-     * @return array<string,list<MediaSlot>> sku => slots, ordered by position
+     * @return array<string,list<MediaEntry>> sku => slots, ordered by position
      */
     public static function scan(string $dir, array $extensions = self::DEFAULT_EXTENSIONS): array
     {
@@ -55,11 +55,11 @@ final class MediaFolder
                 continue;
             }
 
-            $bySku[$m['sku']][] = MediaSlot::file((int) $m['pos'], $path, $entry);
+            $bySku[$m['sku']][] = MediaEntry::file((int) $m['pos'], $path, $entry);
         }
 
         foreach ($bySku as &$slots) {
-            usort($slots, static fn (MediaSlot $a, MediaSlot $b): int => $a->position() <=> $b->position());
+            usort($slots, static fn (MediaEntry $a, MediaEntry $b): int => $a->position() <=> $b->position());
         }
         unset($slots);
 

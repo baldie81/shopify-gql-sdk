@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Baldie81\ShopifyGraphQL\Tests\Resource;
 
 use GuzzleHttp\Psr7\Response;
-use Baldie81\ShopifyGraphQL\Support\MediaSlot;
+use Baldie81\ShopifyGraphQL\Support\MediaEntry;
 use Baldie81\ShopifyGraphQL\Tests\MockClientTestCase;
 
 final class ProductsSyncMediaTest extends MockClientTestCase
@@ -70,8 +70,8 @@ final class ProductsSyncMediaTest extends MockClientTestCase
         ]);
 
         $result = $client->products()->syncMedia('55', [
-            MediaSlot::url(2, 'https://cdn.example.com/ACME_2.jpg'), // out of order on purpose
-            MediaSlot::url(1, 'https://cdn.example.com/ACME_1.jpg'),
+            MediaEntry::url(2, 'https://cdn.example.com/ACME_2.jpg'), // out of order on purpose
+            MediaEntry::url(1, 'https://cdn.example.com/ACME_1.jpg'),
         ]);
 
         self::assertSame(['ACME_1.jpg'], $result['replaced']);
@@ -119,8 +119,8 @@ final class ProductsSyncMediaTest extends MockClientTestCase
         ]);
 
         $result = $client->products()->syncMedia('55', [
-            MediaSlot::url(1, 'https://cdn.example.com/A_1.jpg'),
-            MediaSlot::url(2, 'https://cdn.example.com/A_2.jpg'),
+            MediaEntry::url(1, 'https://cdn.example.com/A_1.jpg'),
+            MediaEntry::url(2, 'https://cdn.example.com/A_2.jpg'),
         ]);
 
         self::assertSame(['A_1.jpg', 'A_2.jpg'], $result['created']);
@@ -138,7 +138,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
             ]]])),
         ]);
 
-        $result = $client->products()->syncMedia('55', [MediaSlot::url(1, 'https://cdn.example.com/solo.jpg')]);
+        $result = $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.example.com/solo.jpg')]);
 
         self::assertSame(['solo.jpg'], $result['created']);
         self::assertCount(2, $this->history); // media lookup + create, no reorder for a single image
@@ -177,7 +177,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
             ]]])),
         ]);
 
-        $result = $client->products()->syncMedia('55', [MediaSlot::url(1, 'https://cdn.example.com/SDK_1.jpg')], prune: true);
+        $result = $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.example.com/SDK_1.jpg')], prune: true);
 
         self::assertSame(['SDK_1.jpg'], $result['replaced']);
         self::assertSame(['gid://shopify/MediaImage/OLD'], $result['pruned']);
@@ -197,7 +197,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
             ]]])),
         ]);
 
-        $result = $client->products()->syncMedia('55', [MediaSlot::url(1, 'https://cdn.example.com/SDK_1.jpg')]);
+        $result = $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.example.com/SDK_1.jpg')]);
 
         self::assertSame([], $result['pruned']);
         self::assertCount(2, $this->history); // no productDeleteMedia call
