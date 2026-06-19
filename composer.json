@@ -24,7 +24,8 @@
   },
   "autoload-dev": {
     "psr-4": {
-      "Baldie81\\ShopifyGraphQL\\Tests\\": "tests/"
+      "Baldie81\\ShopifyGraphQL\\Tests\\": "tests/",
+      "Baldie81\\ShopifyGraphQL\\Examples\\": "examples/"
     }
   },
   "config": {

@@ -466,6 +466,27 @@ Notes:
   numeric ids and extract them back.
 - **Versioning.** The dated `apiVersion` is part of the endpoint and is required.
 
+## Examples
+
+Copy-pasteable usage lives in [`examples/`](examples) — **one class per area**,
+each method demonstrating a single operation against the real public API. Build a
+client with `ExampleClient::create()` (edit its dummy placeholder credentials
+first — never commit real tokens), then call a class, e.g.
+`(new ProductExamples($shopify))->create()`.
+
+- [ProductExamples](examples/ProductExamples.php) — create / update / `set` / delete / search / metafields / find-by-SKU
+- [VariantExamples](examples/VariantExamples.php) — list / create / update / delete (prices, sku, tracked)
+- [InventoryExamples](examples/InventoryExamples.php) — locations, set/adjust quantities, activate
+- [CustomerExamples](examples/CustomerExamples.php) — CRUD, metafields, addresses
+- [OrderExamples](examples/OrderExamples.php) — read/search, fulfill, refund, ERP write-back
+- [CollectionExamples](examples/CollectionExamples.php) — manual & smart collections, product membership
+- [FulfillmentOrderExamples](examples/FulfillmentOrderExamples.php) — holds, move, cancel/close/reschedule, 3PL flow
+- [PriceListExamples](examples/PriceListExamples.php) — price lists + fixed prices
+- [TranslationExamples](examples/TranslationExamples.php) — translate resources
+- [MetafieldDefinitionExamples](examples/MetafieldDefinitionExamples.php) — define product/order/customer metafields
+- [FileExamples](examples/FileExamples.php) — upload files, update in place
+- [BulkOperationExamples](examples/BulkOperationExamples.php) — bulk export/import with streamed results
+
 ## Tests
 
 ```bash
@@ -473,8 +494,8 @@ composer install
 composer test
 ```
 
-Unit tests mock Guzzle (no network). The live check is `examples/products_smoke_test.php`
-(read-only unless `SHOPIFY_SMOKE_WRITE=1`); it needs `SHOPIFY_SHOP` + `SHOPIFY_TOKEN`.
+Unit tests mock Guzzle (no network). For live usage, point an `ExampleClient` at
+a test store and run an example class.
 
 ## Not yet in the spike
 
