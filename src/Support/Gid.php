@@ -35,6 +35,21 @@ final class Gid
         return self::isGid((string) $id) ? (string) $id : self::of('Order', $id);
     }
 
+    public static function collection(int|string $id): string
+    {
+        return self::isGid((string) $id) ? (string) $id : self::of('Collection', $id);
+    }
+
+    public static function priceList(int|string $id): string
+    {
+        return self::isGid((string) $id) ? (string) $id : self::of('PriceList', $id);
+    }
+
+    public static function fulfillmentOrder(int|string $id): string
+    {
+        return self::isGid((string) $id) ? (string) $id : self::of('FulfillmentOrder', $id);
+    }
+
     /**
      * Extract the trailing numeric id from a GID (`gid://shopify/Product/123` → `123`).
      */
