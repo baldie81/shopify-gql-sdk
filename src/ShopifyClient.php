@@ -9,6 +9,7 @@ use GuzzleHttp\ClientInterface;
 use Baldie81\ShopifyGraphQL\GraphQL\Client as GraphQLClient;
 use Baldie81\ShopifyGraphQL\Resource\BulkOperations;
 use Baldie81\ShopifyGraphQL\Resource\Files;
+use Baldie81\ShopifyGraphQL\Resource\MetafieldDefinitions;
 use Baldie81\ShopifyGraphQL\Resource\Products;
 use Baldie81\ShopifyGraphQL\Resource\Translations;
 
@@ -28,6 +29,7 @@ final class ShopifyClient
     private ?BulkOperations $bulkOperations = null;
     private ?Translations $translations = null;
     private ?Files $files = null;
+    private ?MetafieldDefinitions $metafieldDefinitions = null;
 
     public function __construct(
         private readonly GraphQLClient $gql,
@@ -86,5 +88,10 @@ final class ShopifyClient
     public function files(): Files
     {
         return $this->files ??= new Files($this->gql);
+    }
+
+    public function metafieldDefinitions(): MetafieldDefinitions
+    {
+        return $this->metafieldDefinitions ??= new MetafieldDefinitions($this->gql);
     }
 }

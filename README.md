@@ -24,6 +24,8 @@ REST Admin API, so this is GraphQL-only from the start.
   with the digest lookup handled for you.
 - **`Resource\Files`** — staged uploads (push local files to Shopify) and
   `fileUpdate` (replace an image's bytes in place).
+- **`Resource\MetafieldDefinitions`** — create metafield *definitions*
+  (the admin-visible, structured declarations) via `metafieldDefinitionCreate`.
 - **`Support\ProductInput`** — fluent `Arrayable` builder for `ProductCreateInput` /
   `ProductUpdateInput`, incl. inline metafields (write methods accept `builder|array`).
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
@@ -103,6 +105,21 @@ $shopify->products()->setMetafields($productId, [
 ```
 
 Metafields can also ride along with a create/update via `ProductInput::metafield()`.
+
+Note that `metafieldsSet` writes **values**, not **definitions** — the structured,
+admin-visible declaration of a metafield. Create those once (store-wide) with
+`metafieldDefinitions()`:
+
+```php
+use Baldie81\ShopifyGraphQL\Enum\MetafieldType;
+
+$shopify->metafieldDefinitions()->defineProduct('specs', 'material', MetafieldType::SingleLineText, 'Material');
+// some types need validations, e.g. rating:
+$shopify->metafieldDefinitions()->defineProduct('specs', 'rating', MetafieldType::Rating, 'Rating', [
+    'validations' => [['name' => 'scale_min', 'value' => '1'], ['name' => 'scale_max', 'value' => '5']],
+]);
+// re-creating an existing definition returns a TAKEN userError (not an exception).
+```
 
 ## Media (idempotent / upsert)
 
