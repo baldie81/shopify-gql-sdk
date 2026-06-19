@@ -24,7 +24,7 @@ abstract class MockClientTestCase extends TestCase
     /**
      * @param list<mixed> $responses queued Response/Exception objects
      */
-    protected function mockClient(array $responses): ShopifyClient
+    protected function mockClient(array $responses, string $apiVersion = '2025-07'): ShopifyClient
     {
         $this->history = [];
 
@@ -33,12 +33,12 @@ abstract class MockClientTestCase extends TestCase
 
         $guzzle = new Client([
             'handler'     => $stack,
-            'base_uri'    => 'https://test.myshopify.com/admin/api/2025-07/',
+            'base_uri'    => "https://test.myshopify.com/admin/api/{$apiVersion}/",
             'http_errors' => true,
             'headers'     => ['X-Shopify-Access-Token' => 'shptest'],
         ]);
 
-        return ShopifyClient::fromGuzzle($guzzle);
+        return ShopifyClient::fromGuzzle($guzzle, $apiVersion);
     }
 
     protected function lastRequest(): RequestInterface

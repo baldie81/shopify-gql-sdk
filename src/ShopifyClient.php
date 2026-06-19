@@ -60,7 +60,7 @@ final class ShopifyClient
             ],
         ]);
 
-        return new self(new GraphQLClient($guzzle));
+        return new self(new GraphQLClient($guzzle, apiVersion: $config->apiVersion));
     }
 
     /**
@@ -68,9 +68,9 @@ final class ShopifyClient
      * middleware/handlers). Its `base_uri` must point at the versioned Admin API
      * root (`.../admin/api/<version>/`) and carry the access-token header.
      */
-    public static function fromGuzzle(ClientInterface $client): self
+    public static function fromGuzzle(ClientInterface $client, string $apiVersion = '2025-07'): self
     {
-        return new self(new GraphQLClient($client));
+        return new self(new GraphQLClient($client, apiVersion: $apiVersion));
     }
 
     public function graphql(): GraphQLClient

@@ -47,6 +47,35 @@ abstract class AbstractResource
     }
 
     /**
+     * The `@idempotent` directive is mandatory on inventory/refund mutations from
+     * API 2026-04. Returns the operation-variable declaration and the directive to
+     * splice into a mutation (empty strings on older versions), so the same code
+     * works across versions.
+     *
+     * @return array{0:bool,1:string,2:string} [active, varDef, directive]
+     */
+    protected function idempotencyParts(): array
+    {
+        if (!$this->gql->apiVersionAtLeast('2026-04')) {
+            return [false, '', ''];
+        }
+
+        return [true, ', $idempotencyKey: String!', ' @idempotent(key: $idempotencyKey)'];
+    }
+
+    /**
+     * A random idempotency key (UUID v4) for retry-safe inventory/refund writes.
+     */
+    protected function newIdempotencyKey(): string
+    {
+        $bytes    = random_bytes(16);
+        $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+        $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+
+        return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
+    }
+
+    /**
      * Set (create-or-update) metafields on any owner GID via `metafieldsSet`
      * (upsert by owner+namespace+key), chunked to Shopify's 25-per-call limit.
      * Resources expose `setMetafields($id, …)` wrappers that pass the right GID.

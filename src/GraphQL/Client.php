@@ -33,8 +33,30 @@ final class Client
         private readonly string $path = 'graphql.json',
         private readonly int $maxRetries = 2,
         ?callable $sleeper = null,
+        private readonly string $apiVersion = '2025-07',
     ) {
         $this->sleeper = $sleeper ?? static fn (int $microseconds) => usleep($microseconds);
+    }
+
+    public function apiVersion(): string
+    {
+        return $this->apiVersion;
+    }
+
+    /**
+     * Whether the configured API version is at least `$version` (dated `YYYY-MM`).
+     * `latest`/`unstable` count as newest. Used to gate version-specific behaviour.
+     */
+    public function apiVersionAtLeast(string $version): bool
+    {
+        if ($this->apiVersion === 'latest' || $this->apiVersion === 'unstable') {
+            return true;
+        }
+        if (preg_match('/^\d{4}-\d{2}$/', $this->apiVersion) !== 1) {
+            return false;
+        }
+
+        return $this->apiVersion >= $version; // YYYY-MM sorts lexically
     }
 
     /**

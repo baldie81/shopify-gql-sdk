@@ -243,6 +243,14 @@ merging the results. Variant mutations are scoped to one product; `setQuantities
 is not, so a single call can stock items across many products. For mass
 cross-product writes, see the bulk-mutation path under "Bulk operations".
 
+**API 2026-04 compatibility** is handled automatically (the client is version-aware
+via `Configuration::apiVersion`). On 2026-04+, the inventory and `orders()->refund()`
+mutations attach the now-mandatory `@idempotent` directive (a UUID is generated per
+call/chunk; pass `idempotencyKey:` for your own retry-safe key), and `setQuantities`
+resolves the required `changeFromQuantity` (compare-and-swap) for you — supply it
+yourself in an entry to opt into a guarded set. On ≤2026-01 the behaviour is
+unchanged.
+
 ## Bulk operations
 
 Run a query (export) or mutation (import) that Shopify processes asynchronously and

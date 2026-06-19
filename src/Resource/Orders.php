@@ -91,15 +91,20 @@ final class Orders extends AbstractResource
      * @param array<string,mixed> $input
      * @return array{refund:?array<string,mixed>,order:?array<string,mixed>,userErrors:list<array<string,mixed>>}
      */
-    public function refund(string $id, array $input = []): array
+    public function refund(string $id, array $input = [], ?string $idempotencyKey = null): array
     {
-        $mutation = 'mutation ($input: RefundInput!) {'
-            . ' refundCreate(input: $input) {'
+        [$idem, $varDef, $directive] = $this->idempotencyParts();
+
+        $mutation = 'mutation ($input: RefundInput!' . $varDef . ') {'
+            . ' refundCreate(input: $input)' . $directive . ' {'
             . ' refund { id totalRefundedSet { shopMoney { amount currencyCode } } } order { id } userErrors { field message } } }';
 
-        $payload = ['orderId' => Gid::order($id)] + $input;
+        $variables = ['input' => ['orderId' => Gid::order($id)] + $input];
+        if ($idem) {
+            $variables['idempotencyKey'] = $idempotencyKey ?? $this->newIdempotencyKey();
+        }
 
-        return $this->gql->execute($mutation, ['input' => $payload])['refundCreate'] ?? ['refund' => null, 'order' => null, 'userErrors' => []];
+        return $this->gql->execute($mutation, $variables)['refundCreate'] ?? ['refund' => null, 'order' => null, 'userErrors' => []];
     }
 
     /**

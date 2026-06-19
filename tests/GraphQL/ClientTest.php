@@ -48,6 +48,20 @@ final class ClientTest extends TestCase
         ]));
     }
 
+    public function testApiVersionAtLeast(): void
+    {
+        $at = fn (string $v): \Baldie81\ShopifyGraphQL\GraphQL\Client => new Client(
+            new GuzzleClient(['handler' => HandlerStack::create(new MockHandler([])), 'base_uri' => 'https://t.myshopify.com/admin/api/x/']),
+            'graphql.json', 2, null, $v,
+        );
+
+        self::assertTrue($at('2026-04')->apiVersionAtLeast('2026-04'));
+        self::assertTrue($at('2026-07')->apiVersionAtLeast('2026-04'));
+        self::assertTrue($at('latest')->apiVersionAtLeast('2026-04'));
+        self::assertFalse($at('2025-07')->apiVersionAtLeast('2026-04'));
+        self::assertFalse($at('2026-01')->apiVersionAtLeast('2026-04'));
+    }
+
     public function testExecuteReturnsData(): void
     {
         $client = $this->client([new Response(200, [], (string) json_encode(['data' => ['product' => ['id' => 'gid://shopify/Product/1']]]))]);

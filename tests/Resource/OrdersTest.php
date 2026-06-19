@@ -86,6 +86,32 @@ final class OrdersTest extends MockClientTestCase
         self::assertSame('Damaged', $input['note']);
     }
 
+    public function testRefundOn2026_04AddsIdempotentDirective(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['refundCreate' => ['refund' => ['id' => 'gid://shopify/Refund/3'], 'order' => ['id' => 'gid://shopify/Order/7'], 'userErrors' => []]],
+        ]))], '2026-04');
+
+        $client->orders()->refund('7', ['note' => 'x']);
+
+        $body = $this->body();
+        self::assertStringContainsString('refundCreate(input: $input) @idempotent(key: $idempotencyKey)', $body['query']);
+        self::assertNotEmpty($body['variables']['idempotencyKey']);
+    }
+
+    public function testRefundOnOlderVersionHasNoIdempotentDirective(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['refundCreate' => ['refund' => ['id' => 'gid://shopify/Refund/3'], 'order' => null, 'userErrors' => []]],
+        ]))]); // default 2025-07
+
+        $client->orders()->refund('7', ['note' => 'x']);
+
+        $body = $this->body();
+        self::assertStringNotContainsString('@idempotent', $body['query']);
+        self::assertArrayNotHasKey('idempotencyKey', $body['variables']);
+    }
+
     public function testSetMetafieldsUsesOrderOwnerId(): void
     {
         $client = $this->mockClient([new Response(200, [], (string) json_encode([
