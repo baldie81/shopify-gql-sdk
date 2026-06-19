@@ -7,8 +7,8 @@
  * SHOPIFY_SMOKE_WRITE=1 it also creates a DRAFT product (unpublished) and
  * updates it. The product is left in place — this spike has no productDelete.
  *
- *   SHOPIFY_SHOP=my-store SHOPIFY_TOKEN=shpat_xxx php examples/products_smoke_test.php
- *   SHOPIFY_SMOKE_WRITE=1 SHOPIFY_SHOP=... SHOPIFY_TOKEN=... php examples/products_smoke_test.php
+ *   SHOPIFY_SHOP=my-store SHOPIFY_TOKEN=shpat_xxx php examples_local/products_smoke_test.php
+ *   SHOPIFY_SMOKE_WRITE=1 SHOPIFY_SHOP=... SHOPIFY_TOKEN=... php examples_local/products_smoke_test.php
  *
  * Required env: SHOPIFY_SHOP (e.g. "my-store" or "my-store.myshopify.com"),
  * SHOPIFY_TOKEN (Admin API access token). Optional: SHOPIFY_API_VERSION,
