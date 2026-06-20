@@ -7,6 +7,7 @@ namespace Baldie81\ShopifyGraphQL\Resource;
 use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\ClientInterface;
 use Baldie81\ShopifyGraphQL\Enum\BulkOperationStatus;
+use Baldie81\ShopifyGraphQL\Enum\BulkOperationType;
 use Baldie81\ShopifyGraphQL\Exception\TransportException;
 use Baldie81\ShopifyGraphQL\GraphQL\Client;
 
@@ -168,12 +169,14 @@ final class BulkOperations extends AbstractResource
     }
 
     /**
-     * The most recent bulk operation of the given type (QUERY or MUTATION).
+     * The most recent bulk operation of the given type. Accepts a
+     * {@see BulkOperationType} (or the raw "QUERY"/"MUTATION" string).
      *
      * @return array<string,mixed>|null
      */
-    public function current(string $type = 'QUERY'): ?array
+    public function current(BulkOperationType|string $type = BulkOperationType::Query): ?array
     {
+        $type  = $type instanceof BulkOperationType ? $type->value : $type;
         $query = 'query ($type: BulkOperationType) { currentBulkOperation(type: $type) { ' . self::FIELDS . ' } }';
 
         return $this->gql->execute($query, ['type' => $type])['currentBulkOperation'] ?? null;

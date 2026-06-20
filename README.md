@@ -47,7 +47,7 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Support\ProductField`** — fluent per-field translations (`title()->withTranslation(...)`).
 - **`Support\Gid`** — global-ID helpers (`gid://shopify/Product/123`).
 - **`Enums`** — `ProductStatus`, `MetafieldType`, `MediaContentType`,
-  `BulkOperationStatus`, `ProductTranslatableField`.
+  `BulkOperationStatus`, `BulkOperationType`, `ProductTranslatableField`.
 - **`Exceptions`** — `GraphQLException` (top-level errors / non-2xx), `ThrottledException`
   (cost-limit / 429), `TransportException`, under a `ShopifyException` base.
 
@@ -271,7 +271,7 @@ if (($final['status'] ?? null) === 'COMPLETED') {
 }
 // on failure: $final['status'] === 'FAILED' with $final['errorCode']; results($final, partial: true) reads partialDataUrl
 
-$bulk->current('QUERY');                  // most recent op of a type
+$bulk->current(BulkOperationType::Query); // most recent op of a type (or 'QUERY')
 $bulk->cancel($op['id']);
 ```
 

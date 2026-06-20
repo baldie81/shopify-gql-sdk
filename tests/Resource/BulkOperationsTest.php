@@ -9,6 +9,7 @@ use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
+use Baldie81\ShopifyGraphQL\Enum\BulkOperationType;
 use Baldie81\ShopifyGraphQL\GraphQL\Client;
 use Baldie81\ShopifyGraphQL\Resource\BulkOperations;
 use Baldie81\ShopifyGraphQL\Resource\Files;
@@ -67,6 +68,28 @@ final class BulkOperationsTest extends TestCase
 
         self::assertSame('COMPLETED', $op['status']);
         self::assertSame('https://x/y.jsonl', $op['url']);
+    }
+
+    public function testCurrentAcceptsEnumType(): void
+    {
+        $bulk = $this->resource([new Response(200, [], (string) json_encode([
+            'data' => ['currentBulkOperation' => ['id' => 'gid://shopify/BulkOperation/9', 'status' => 'COMPLETED']],
+        ]))]);
+
+        $bulk->current(BulkOperationType::Mutation);
+
+        $body = json_decode((string) $this->history[0]['request']->getBody(), true);
+        self::assertSame('MUTATION', $body['variables']['type']);
+    }
+
+    public function testCurrentStillAcceptsStringType(): void
+    {
+        $bulk = $this->resource([new Response(200, [], (string) json_encode(['data' => ['currentBulkOperation' => null]]))]);
+
+        $bulk->current('QUERY'); // backward-compatible
+
+        $body = json_decode((string) $this->history[0]['request']->getBody(), true);
+        self::assertSame('QUERY', $body['variables']['type']);
     }
 
     public function testPollLoopsUntilTerminalStatus(): void
