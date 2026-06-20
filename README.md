@@ -1,4 +1,4 @@
-# Shopify Admin GraphQL PHP SDK — *spike*
+# Shopify Admin GraphQL PHP SDK
 
 A small, **framework-independent** PHP client for the Shopify **Admin GraphQL**
 API. No framework coupling — just PHP 8.4+ and Guzzle. Shopify is deprecating the
@@ -19,6 +19,8 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Resource\Customers`** — get / search / create / update, plus metafields.
 - **`Resource\Orders`** — read/search, fulfillment, refunds, and metafields
   (e.g. writing ERP sync state back onto the order).
+- **`Resource\DraftOrders`** — create orders (manual / phone / B2B): build a draft,
+  then `complete()` it into a real Order.
 - **`Resource\FulfillmentOrders`** — the fulfillment-order lifecycle beneath
   `orders()->fulfill()`: holds, moves, close/cancel/open/reschedule, merge/split,
   and the 3PL request flow (submit/accept/reject fulfillment + cancellation).
@@ -38,7 +40,7 @@ REST Admin API, so this is GraphQL-only from the start.
   `ProductUpdateInput`, incl. inline metafields (write methods accept `builder|array`).
 - **`Support\VariantInput`** — fluent builder for variant updates (price / compareAtPrice / sku / tracked).
 - **`Support\CustomerInput`** / **`Support\Address`** — builders for customers and mailing addresses.
-- **`Support\CollectionInput`** / **`Support\PriceListInput`** — builders for collections and price lists.
+- **`Support\CollectionInput`** / **`Support\PriceListInput`** / **`Support\DraftOrderInput`** — builders for collections, price lists and draft orders.
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
 - **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
 - **`Support\MediaEntry` / `Support\MediaFolder`** — positioned media + parsing a
@@ -424,6 +426,43 @@ $shopify->orders()->setMetafields($orderId, [
 Metafield **definitions** for these owners: `metafieldDefinitions()->defineOrder(...)`
 and `defineCustomer(...)` (alongside `defineProduct(...)`).
 
+## Draft orders (creating orders)
+
+Orders aren't created directly — you build a **draft order** and complete it.
+
+```php
+use Baldie81\ShopifyGraphQL\Support\DraftOrderInput;
+
+$draft = $shopify->draftOrders()->create(
+    DraftOrderInput::make()
+        ->customer($customerId)                  // purchasingEntity under the hood
+        ->lineItem($variantId, 2)                // a catalog variant
+        ->customLineItem('Gift wrap', '5.00')    // a custom (non-catalog) line
+        ->useCustomerDefaultAddress(),
+);
+
+// Turn the draft into a real Order (paymentPending: true to leave it unpaid):
+$completed = $shopify->draftOrders()->complete($draft['draftOrder']['id']);
+$orderId   = $completed['draftOrder']['order']['id'];
+```
+
+`calculate()` returns totals without saving; `update()` / `delete()` and
+`searchAll()` round out the resource.
+
+## Custom field selection
+
+Reads use a lean default selection, but you can pass your own selection set as the
+optional `$fields` argument to override it:
+
+```php
+$shopify->products()->get($id, fields: 'id handle variants(first: 50) { nodes { id sku price } }');
+$shopify->orders()->searchAll('financial_status:paid', fields: 'id name lineItems(first: 100) { nodes { title quantity } }');
+```
+
+Available on `get()` / `search()` / `searchAll()` for Products, Orders, Customers,
+Collections and DraftOrders, plus `variants()->list()`. Pass `null` (the default)
+to keep the built-in selection.
+
 ## Return data (built for persistence)
 
 Every write method returns the identifiers and errors you'd want to store, rather
@@ -482,6 +521,7 @@ first — never commit real tokens), then call a class, e.g.
 - [CollectionExamples](examples/CollectionExamples.php) — manual & smart collections, product membership
 - [FulfillmentOrderExamples](examples/FulfillmentOrderExamples.php) — holds, move, cancel/close/reschedule, 3PL flow
 - [PriceListExamples](examples/PriceListExamples.php) — price lists + fixed prices
+- [DraftOrderExamples](examples/DraftOrderExamples.php) — create orders via draft orders (build → complete)
 - [TranslationExamples](examples/TranslationExamples.php) — translate resources
 - [MetafieldDefinitionExamples](examples/MetafieldDefinitionExamples.php) — define product/order/customer metafields
 - [FileExamples](examples/FileExamples.php) — upload files, update in place
@@ -497,9 +537,9 @@ composer test
 Unit tests mock Guzzle (no network). For live usage, point an `ExampleClient` at
 a test store and run an example class.
 
-## Not yet in the spike
+## Not yet
 
-Draft orders (order *creation*) and caller-supplied selection sets.
+Webhook subscriptions, discounts/price rules, metaobjects, and gift cards.
 
 ## License
 
