@@ -33,8 +33,8 @@ use Baldie81\ShopifyGraphQL\Support\ProductInput;
  *   - set($data)                — productSet: options + variants from the record
  *   - delete($productId)        — productDelete (returns deletedProductId)
  *   - get($productId)           — read one product (numeric id or GID)
- *   - searchPage()              — one page + the cursor for the next
- *   - searchAll()               — every page, cursor pagination handled
+ *   - searchPage($query, $first)— one page + the cursor for the next
+ *   - searchAll($query)         — every page, cursor pagination handled
  *   - setMetafields($productId, $data) — upsert the record's custom attributes
  *   - findBySku($data)          — resolve a product GID from the ERP SKU
  *
@@ -151,9 +151,9 @@ final class ProductExamples
     /**
      * One page of a search (Shopify query syntax), with the cursor for the next page.
      */
-    public function searchPage(): array
+    public function searchPage(string $query = 'status:active', int $first = 25): array
     {
-        $page = $this->shopify->products()->search('status:active', first: 25);
+        $page = $this->shopify->products()->search($query, first: $first);
         // $page['nodes'], $page['pageInfo']['hasNextPage'], $page['pageInfo']['endCursor']
         return $page;
     }
@@ -161,9 +161,9 @@ final class ProductExamples
     /**
      * Walk every page and return all matching products (cursor pagination handled).
      */
-    public function searchAll(): array
+    public function searchAll(string $query = 'tag:organic'): array
     {
-        return $this->shopify->products()->searchAll('tag:organic');
+        return $this->shopify->products()->searchAll($query);
     }
 
     /**

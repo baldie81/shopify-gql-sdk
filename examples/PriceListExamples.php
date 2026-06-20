@@ -27,7 +27,7 @@ use Baldie81\ShopifyGraphQL\Support\PriceListInput;
  *
  * Operations shown in this file:
  *   - create($catalogId, $data)              — priceListCreate (currency + adjustment)
- *   - list()                                 — all price lists (paginated)
+ *   - list($pageSize)                        — all price lists (paginated)
  *   - delete($priceListId)                   — priceListDelete (deletedId)
  *   - setFixedPrices($priceListId,$variantId,$data) — override a variant's price
  *   - updatePrices($priceListId, $add, $del) — add + delete fixed prices in one call
@@ -72,9 +72,9 @@ final class PriceListExamples
     /**
      * All price lists in the store (cursor pagination handled).
      */
-    public function list(): array
+    public function list(int $pageSize = 250): array
     {
-        return $this->shopify->priceLists()->all();
+        return $this->shopify->priceLists()->all($pageSize);
     }
 
     /**

@@ -21,7 +21,7 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
  *   }
  *
  * Operations shown in this file:
- *   - locations()                                   — store locations
+ *   - locations($first)                             — store locations
  *   - setQuantities($itemId, $locId, $data)         — set ABSOLUTE on-hand ("now N")
  *   - adjustQuantities($itemId, $locId, $data)      — change by a DELTA (±N)
  *   - setWithIdempotencyKey($itemId, $locId, $data) — same, retry-safe key
@@ -57,9 +57,9 @@ final class InventoryExamples
     /**
      * The store's locations (pick one to stock against).
      */
-    public function locations(): array
+    public function locations(int $first = 50): array
     {
-        return $this->shopify->inventory()->locations();
+        return $this->shopify->inventory()->locations($first);
     }
 
     /**

@@ -24,7 +24,7 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
  * Shopify runs only ONE bulk operation of each type at a time per shop.
  *
  * Operations shown in this file:
- *   - exportProducts()         — runQuery + poll + results() (streamed JSONL)
+ *   - exportProducts($query)   — runQuery + poll + results() (streamed JSONL)
  *   - bulkUpdateProducts($rows)— importMutation (rows → JSONL → staged upload) + poll
  *   - current($type)           — inspect the current operation (BulkOperationType)
  *
@@ -53,11 +53,11 @@ final class BulkOperationExamples
      *
      * @return list<array<string,mixed>>
      */
-    public function exportProducts(): array
+    public function exportProducts(string $query = '{ products { edges { node { id title } } } }'): array
     {
         $bulk = $this->shopify->bulkOperations();
 
-        $op    = $bulk->runQuery('{ products { edges { node { id title } } } }')['bulkOperation'];
+        $op    = $bulk->runQuery($query)['bulkOperation'];
         $final = $bulk->poll($op['id']);   // waits until COMPLETED / FAILED / …
 
         $rows = [];

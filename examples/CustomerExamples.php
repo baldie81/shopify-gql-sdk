@@ -27,7 +27,7 @@ use Baldie81\ShopifyGraphQL\Support\Metafield;
  *   - create($data)                          — customerCreate (+ ERP-id metafield)
  *   - update($customerId, $data)             — customerUpdate; partial
  *   - get($customerId)                       — read one (withAddresses optional)
- *   - searchByTag()                          — searchAll with query syntax
+ *   - searchByTag($tag)                      — searchAll by tag (addresses inline)
  *   - setMetafields($customerId, $data)      — upsert customer metafields
  *   - addAddress($customerId, $data)         — customerAddressCreate (Address builder)
  *   - listAddresses($customerId)             — a customer's addresses
@@ -101,11 +101,11 @@ final class CustomerExamples
     }
 
     /**
-     * Search with Shopify query syntax, walking every page (addresses inline).
+     * Search customers by tag, walking every page (addresses included inline).
      */
-    public function searchByTag(): array
+    public function searchByTag(string $tag = 'vip'): array
     {
-        return $this->shopify->customers()->searchAll('tag:vip', withAddresses: true);
+        return $this->shopify->customers()->searchAll("tag:{$tag}", withAddresses: true);
     }
 
     /**

@@ -25,7 +25,7 @@ use Baldie81\ShopifyGraphQL\Support\Metafield;
  *
  * Operations shown in this file:
  *   - get($orderId)                — read one order
- *   - findPaidUnfulfilled()        — search (paginated)
+ *   - search($query)               — search orders (paginated)
  *   - fulfill($orderId, $shipment) — fulfil open fulfillment orders, with tracking
  *   - refund($orderId, $refund)    — partial/whole refund (returns money)
  *   - writeErpState($orderId, $erp)— stamp ERP sync state onto the order (metafields)
@@ -81,11 +81,12 @@ final class OrderExamples
     }
 
     /**
-     * Search with Shopify order query syntax, walking every page.
+     * Search orders with Shopify query syntax, walking every page. The default
+     * finds paid-but-unfulfilled orders.
      */
-    public function findPaidUnfulfilled(): array
+    public function search(string $query = 'financial_status:paid AND fulfillment_status:unfulfilled'): array
     {
-        return $this->shopify->orders()->searchAll('financial_status:paid AND fulfillment_status:unfulfilled');
+        return $this->shopify->orders()->searchAll($query);
     }
 
     /**
