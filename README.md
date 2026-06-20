@@ -28,6 +28,10 @@ REST Admin API, so this is GraphQL-only from the start.
   (`addProducts` sync; `removeProducts`/`reorderProducts` async jobs), metafields.
 - **`Resource\PriceLists`** — contextual/market/B2B pricing: price lists plus
   fixed-price management (`setPrices`/`updatePrices`/`deletePrices`).
+- **`Resource\GiftCards`** — issue gift cards (one-time code), credit/debit the
+  balance, and deactivate (no delete).
+- **`Resource\Webhooks`** — webhook subscriptions: subscribe a topic to an
+  endpoint (version-aware `uri`/`callbackUrl`), list/update/delete.
 - **`Resource\BulkOperations`** — bulk query, and `importMutation()` (JSONL +
   `BULK_MUTATION_VARIABLES` staged upload), poll, read the JSONL.
 - **`Resource\Translations`** — translate any resource (products, metafields…),
@@ -40,7 +44,7 @@ REST Admin API, so this is GraphQL-only from the start.
   `ProductUpdateInput`, incl. inline metafields (write methods accept `builder|array`).
 - **`Support\VariantInput`** — fluent builder for variant updates (price / compareAtPrice / sku / tracked).
 - **`Support\CustomerInput`** / **`Support\Address`** — builders for customers and mailing addresses.
-- **`Support\CollectionInput`** / **`Support\PriceListInput`** / **`Support\DraftOrderInput`** — builders for collections, price lists and draft orders.
+- **`Support\CollectionInput`** / **`Support\PriceListInput`** / **`Support\DraftOrderInput`** / **`Support\GiftCardInput`** — builders for collections, price lists, draft orders and gift cards.
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
 - **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
 - **`Support\MediaEntry` / `Support\MediaFolder`** — positioned media + parsing a
@@ -49,7 +53,7 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Support\ProductField`** — fluent per-field translations (`title()->withTranslation(...)`).
 - **`Support\Gid`** — global-ID helpers (`gid://shopify/Product/123`).
 - **`Enums`** — `ProductStatus`, `MetafieldType`, `MediaContentType`,
-  `BulkOperationStatus`, `BulkOperationType`, `ProductTranslatableField`.
+  `BulkOperationStatus`, `BulkOperationType`, `WebhookTopic`, `ProductTranslatableField`.
 - **`Exceptions`** — `GraphQLException` (top-level errors / non-2xx), `ThrottledException`
   (cost-limit / 429), `TransportException`, under a `ShopifyException` base.
 
@@ -463,6 +467,41 @@ Available on `get()` / `search()` / `searchAll()` for Products, Orders, Customer
 Collections and DraftOrders, plus `variants()->list()`. Pass `null` (the default)
 to keep the built-in selection.
 
+## Gift cards
+
+```php
+use Baldie81\ShopifyGraphQL\Support\GiftCardInput;
+
+$result = $shopify->giftCards()->create(GiftCardInput::make('25.00')->note('Loyalty reward'));
+$code   = $result['giftCardCode'];   // ⚠ the plaintext code is returned ONLY here — capture it
+
+$shopify->giftCards()->credit($id, '10.00', 'EUR');   // add funds
+$shopify->giftCards()->debit($id, '5.00', 'EUR');     // remove funds
+$shopify->giftCards()->deactivate($id);               // permanent — there is no delete
+```
+
+Balance changes go through `credit()`/`debit()` (never `update()`), and a gift
+card can only be **deactivated**, not deleted.
+
+## Webhooks
+
+```php
+use Baldie81\ShopifyGraphQL\Enum\WebhookTopic;
+
+$shopify->webhooks()->create(
+    WebhookTopic::OrdersCreate,                    // or a raw topic string
+    'https://example.com/webhooks/orders',         // the endpoint
+    ['includeFields' => ['id', 'name']],
+);
+
+$shopify->webhooks()->all();
+$shopify->webhooks()->delete($id);
+```
+
+You always pass the endpoint as a `uri`; the SDK maps it to `callbackUrl`
+automatically on ≤2025-07 (where `uri` doesn't exist yet) and uses `uri` on
+2025-10+. Verify the `X-Shopify-Hmac-Sha256` header on the receiving end.
+
 ## Return data (built for persistence)
 
 Every write method returns the identifiers and errors you'd want to store, rather
@@ -522,6 +561,8 @@ first — never commit real tokens), then call a class, e.g.
 - [FulfillmentOrderExamples](examples/FulfillmentOrderExamples.php) — holds, move, cancel/close/reschedule, 3PL flow
 - [PriceListExamples](examples/PriceListExamples.php) — price lists + fixed prices
 - [DraftOrderExamples](examples/DraftOrderExamples.php) — create orders via draft orders (build → complete)
+- [GiftCardExamples](examples/GiftCardExamples.php) — issue / credit / debit / deactivate gift cards
+- [WebhookExamples](examples/WebhookExamples.php) — subscribe / list / update / delete webhook subscriptions
 - [TranslationExamples](examples/TranslationExamples.php) — translate resources
 - [MetafieldDefinitionExamples](examples/MetafieldDefinitionExamples.php) — define product/order/customer metafields
 - [FileExamples](examples/FileExamples.php) — upload files, update in place
@@ -539,7 +580,7 @@ a test store and run an example class.
 
 ## Not yet
 
-Webhook subscriptions, discounts/price rules, metaobjects, and gift cards.
+Discounts / price rules and metaobjects.
 
 ## License
 
