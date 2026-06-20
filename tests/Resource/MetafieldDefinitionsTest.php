@@ -48,4 +48,53 @@ final class MetafieldDefinitionsTest extends MockClientTestCase
         self::assertNull($result['definition']);
         self::assertSame('TAKEN', $result['userErrors'][0]['code']);
     }
+
+    public function testAllListsDefinitionsForOwnerType(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['metafieldDefinitions' => ['nodes' => [
+                ['id' => 'gid://shopify/MetafieldDefinition/1', 'namespace' => 'custom', 'key' => 'erp_id', 'type' => ['name' => 'single_line_text_field']],
+            ]]],
+        ]))]);
+
+        $nodes = $client->metafieldDefinitions()->all('PRODUCT');
+
+        self::assertCount(1, $nodes);
+        self::assertSame('erp_id', $nodes[0]['key']);
+        $body = $this->body();
+        self::assertSame('PRODUCT', $body['variables']['ownerType']);
+        self::assertStringContainsString('metafieldDefinitions(ownerType:', $body['query']);
+    }
+
+    public function testUpdateSendsUpdateInput(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['metafieldDefinitionUpdate' => [
+                'updatedDefinition' => ['id' => 'gid://shopify/MetafieldDefinition/1', 'name' => 'ERP id'],
+                'userErrors'        => [],
+            ]],
+        ]))]);
+
+        $result = $client->metafieldDefinitions()->update([
+            'ownerType' => 'PRODUCT', 'namespace' => 'custom', 'key' => 'erp_id', 'name' => 'ERP id',
+        ]);
+
+        self::assertSame('ERP id', $result['definition']['name']);
+        self::assertStringContainsString('MetafieldDefinitionUpdateInput!', $this->body()['query']);
+    }
+
+    public function testDeleteReturnsDeletedId(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['metafieldDefinitionDelete' => [
+                'deletedDefinitionId' => 'gid://shopify/MetafieldDefinition/1',
+                'userErrors'          => [],
+            ]],
+        ]))]);
+
+        $result = $client->metafieldDefinitions()->delete('gid://shopify/MetafieldDefinition/1', true);
+
+        self::assertSame('gid://shopify/MetafieldDefinition/1', $result['deletedDefinitionId']);
+        self::assertTrue($this->body()['variables']['deleteAll']);
+    }
 }

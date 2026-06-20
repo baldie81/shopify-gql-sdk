@@ -84,4 +84,63 @@ final class MetafieldDefinitions extends AbstractResource
     {
         return $this->define('CUSTOMER', $namespace, $key, $type, $name, $extra);
     }
+
+    /**
+     * List definitions for an owner type (`PRODUCT`, `VARIANT`, `ORDER`, `CUSTOMER`, …).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function all(string $ownerType, int $first = 250): array
+    {
+        $query = 'query ($ownerType: MetafieldOwnerType!, $first: Int!) {'
+            . ' metafieldDefinitions(ownerType: $ownerType, first: $first) {'
+            . ' nodes { id name namespace key description ownerType type { name } } } }';
+
+        $first = max(1, min($first, 250));
+
+        return $this->gql->execute($query, ['ownerType' => $ownerType, 'first' => $first])['metafieldDefinitions']['nodes'] ?? [];
+    }
+
+    /**
+     * Update a definition (`metafieldDefinitionUpdate`). The input identifies the
+     * definition by ownerType+namespace+key; `type` is immutable. Updatable fields
+     * include `name`, `description`, `validations`.
+     *
+     * @param array<string,mixed> $definition MetafieldDefinitionUpdateInput
+     * @return array{definition:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     */
+    public function update(array $definition): array
+    {
+        $mutation = 'mutation ($definition: MetafieldDefinitionUpdateInput!) {'
+            . ' metafieldDefinitionUpdate(definition: $definition) {'
+            . ' updatedDefinition { id name namespace key ownerType type { name } }'
+            . ' userErrors { field message code } } }';
+
+        $result = $this->gql->execute($mutation, ['definition' => $definition])['metafieldDefinitionUpdate'] ?? [];
+
+        return [
+            'definition' => $result['updatedDefinition'] ?? null,
+            'userErrors' => $result['userErrors'] ?? [],
+        ];
+    }
+
+    /**
+     * Delete a definition (`metafieldDefinitionDelete`). Optionally delete every
+     * metafield that uses it.
+     *
+     * @return array{deletedDefinitionId:?string,userErrors:list<array<string,mixed>>}
+     */
+    public function delete(string $id, bool $deleteAllAssociatedMetafields = false): array
+    {
+        $mutation = 'mutation ($id: ID!, $deleteAll: Boolean) {'
+            . ' metafieldDefinitionDelete(id: $id, deleteAllAssociatedMetafields: $deleteAll) {'
+            . ' deletedDefinitionId userErrors { field message code } } }';
+
+        $result = $this->gql->execute($mutation, ['id' => $id, 'deleteAll' => $deleteAllAssociatedMetafields])['metafieldDefinitionDelete'] ?? [];
+
+        return [
+            'deletedDefinitionId' => $result['deletedDefinitionId'] ?? null,
+            'userErrors'          => $result['userErrors'] ?? [],
+        ];
+    }
 }
