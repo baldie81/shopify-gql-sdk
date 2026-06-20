@@ -13,60 +13,81 @@ use Baldie81\ShopifyGraphQL\Support\CollectionInput;
  *
  *   $ex = new CollectionExamples(ExampleClient::create());
  *
+ * Real-life usage: a write method takes **one collection record** as `$data` (a
+ * merchandising/ERP definition, defaulting to {@see SAMPLE}). Collection/product
+ * ids come from Shopify (params). Typical loop:
+ *
+ *   foreach ($source->collections() as $record) {
+ *       $ex->createManual($record);
+ *   }
+ *
  * Operations shown in this file:
- *   - createManual()   — a collection you fill by hand
- *   - createSmart()    — a rule-based collection (auto-membership)
- *   - update()         — collectionUpdate (partial)
- *   - delete()         — collectionDelete (returns deletedCollectionId)
- *   - addProducts()    — add to a manual collection (SYNC)
- *   - removeProducts() — remove (ASYNC job; this method shows polling via job())
- *   - listProducts()   — the collection's products
+ *   - createManual($data)               — a collection you fill by hand
+ *   - createSmart($data)                — a rule-based collection (auto-membership)
+ *   - update($collectionId, $data)      — collectionUpdate (partial)
+ *   - delete($collectionId)             — collectionDelete (deletedCollectionId)
+ *   - addProducts($collectionId, $ids)  — add to a manual collection (SYNC)
+ *   - removeProducts($collectionId,$ids)— remove (ASYNC job; shows polling)
+ *   - listProducts($collectionId)       — the collection's products
  *
  * Key points:
- *   - Manual vs smart: `CollectionInput::rule(column, relation, condition)` makes
- *     it smart; `disjunctive(false)` ANDs the rules, `true` ORs them.
- *   - Membership asymmetry: `addProducts` is synchronous and returns the
- *     collection, but `removeProducts`/`reorderProducts` run as **async jobs** —
- *     poll the returned job with `collections()->job($id)` until `done`.
- *   - Product ids may be numeric or GIDs.
+ *   - `CollectionInput::rule(column, relation, condition)` makes it smart;
+ *     `disjunctive(false)` ANDs the rules, `true` ORs them.
+ *   - Membership asymmetry: `addProducts` is synchronous; `removeProducts` /
+ *     `reorderProducts` run as **async jobs** — poll with `collections()->job($id)`.
  *
- * Related: ProductExamples, MetafieldDefinitionExamples (collection metafields).
+ * Related: ProductExamples, MetafieldDefinitionExamples.
  */
 final class CollectionExamples
 {
+    /** One collection record, shaped like a merchandising/ERP definition. */
+    private const SAMPLE = [
+        'title'       => 'Summer',
+        'description' => '<p>Warm-weather picks.</p>',
+        'sortOrder'   => 'BEST_SELLING',
+        'rule'        => ['column' => 'TAG', 'relation' => 'EQUALS', 'condition' => 'sale'],
+    ];
+
     public function __construct(private readonly ShopifyClient $shopify) {}
 
     /**
-     * Create a manual collection (you add products yourself).
+     * Create a manual collection from the record (you add products yourself).
+     *
+     * @param array<string,mixed> $data a collection record (defaults to {@see SAMPLE})
      */
-    public function createManual(): array
+    public function createManual(array $data = self::SAMPLE): array
     {
         return $this->shopify->collections()->create(
-            CollectionInput::make('Summer')
-                ->descriptionHtml('<p>Warm-weather picks.</p>')
-                ->sortOrder('BEST_SELLING'),
+            CollectionInput::make($data['title'])
+                ->descriptionHtml($data['description'])
+                ->sortOrder($data['sortOrder']),
         );
     }
 
     /**
-     * Create a smart collection — products tagged "sale" join automatically.
-     * `disjunctive(false)` ANDs the rules (true would OR them).
+     * Create a smart collection from the record's rule (auto-membership).
+     *
+     * @param array<string,mixed> $data a collection record (uses its `rule`)
      */
-    public function createSmart(): array
+    public function createSmart(array $data = self::SAMPLE): array
     {
+        $rule = $data['rule'];
+
         return $this->shopify->collections()->create(
-            CollectionInput::make('On sale')
+            CollectionInput::make($data['title'])
                 ->disjunctive(false)
-                ->rule('TAG', 'EQUALS', 'sale'),
+                ->rule($rule['column'], $rule['relation'], $rule['condition']),
         );
     }
 
     /**
      * Partial update of a collection (here, its description).
+     *
+     * @param array<string,mixed> $data the record carrying the new values
      */
-    public function update(string $collectionId): array
+    public function update(string $collectionId, array $data = self::SAMPLE): array
     {
-        return $this->shopify->collections()->update($collectionId, CollectionInput::make()->descriptionHtml('<p>Updated.</p>'));
+        return $this->shopify->collections()->update($collectionId, CollectionInput::make()->descriptionHtml($data['description']));
     }
 
     /**
@@ -79,9 +100,9 @@ final class CollectionExamples
 
     /**
      * Add products to a manual collection (synchronous). Ids may be numeric or
-     * GIDs — the SDK coerces them to ProductGIDs.
+     * GIDs — the SDK coerces them to Product GIDs.
      *
-     * @param list<string> $productIds
+     * @param list<string> $productIds product ids (from Shopify / your id map)
      */
     public function addProducts(string $collectionId, array $productIds): array
     {

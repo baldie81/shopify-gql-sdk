@@ -15,53 +15,80 @@ use Baldie81\ShopifyGraphQL\Support\Metafield;
  *
  *   $ex = new CustomerExamples(ExampleClient::create());
  *
+ * Real-life usage: a write method takes **one customer record** as `$data` (an
+ * ERP/CRM payload, defaulting to {@see SAMPLE}). Customer/address ids come from
+ * Shopify (params). Typical loop:
+ *
+ *   foreach ($erp->customers() as $record) {
+ *       $ex->create($record);
+ *   }
+ *
  * Operations shown in this file:
- *   - create()        — customerCreate from a CustomerInput builder (+ metafield)
- *   - update()        — customerUpdate; partial, id injected for you
- *   - get()           — read one (withAddresses: true to include the full list)
- *   - searchByTag()   — searchAll with Shopify query syntax (paginated)
- *   - setMetafields() — upsert customer metafields (e.g. an ERP id)
- *   - addAddress()    — customerAddressCreate (Address builder, optional default)
- *   - listAddresses() — a customer's addresses (each with its id)
- *   - updateAddress() / deleteAddress() — by address id
+ *   - create($data)                          — customerCreate (+ ERP-id metafield)
+ *   - update($customerId, $data)             — customerUpdate; partial
+ *   - get($customerId)                       — read one (withAddresses optional)
+ *   - searchByTag()                          — searchAll with query syntax
+ *   - setMetafields($customerId, $data)      — upsert customer metafields
+ *   - addAddress($customerId, $data)         — customerAddressCreate (Address builder)
+ *   - listAddresses($customerId)             — a customer's addresses
+ *   - updateAddress / deleteAddress          — by address id
  *
  * Notes:
- *   - `CustomerInput` only sends the fields you set, so one builder serves both
- *     create and partial update.
+ *   - `CustomerInput` only sends the fields you set, so one builder serves create
+ *     and partial update.
  *   - Reads include `defaultAddress` cheaply; pass `withAddresses: true` for the
- *     full list (or call `addresses()` on demand).
+ *     full list.
  *   - Addresses use the **dedicated** mutations (create/update/delete) — Shopify
  *     deprecated setting addresses inline on the customer.
- *   - IDs may be numeric or GIDs; writes report problems in `userErrors`.
  *
- * Related: OrderExamples (a customer's orders), MetafieldDefinitionExamples
- * (surface customer metafields in the admin).
+ * Related: OrderExamples, MetafieldDefinitionExamples.
  */
 final class CustomerExamples
 {
+    /** One customer record, shaped like an ERP/CRM payload. */
+    private const SAMPLE = [
+        'email'     => 'jane@example.com',
+        'firstName' => 'Jane',
+        'lastName'  => 'Doe',
+        'tags'      => ['vip'],
+        'note'      => 'Imported from ERP',
+        'erpId'     => 'C-1001',
+        'address'   => [
+            'address1'     => '500 Congress Ave',
+            'city'         => 'Austin',
+            'provinceCode' => 'TX',
+            'zip'          => '78701',
+            'countryCode'  => 'US',
+        ],
+    ];
+
     public function __construct(private readonly ShopifyClient $shopify) {}
 
     /**
-     * Create a customer with name, a tag and an inline ERP metafield.
-     * Result: `['customer' => ['id' => …], 'userErrors' => [...]]`.
+     * Create a customer from one ERP record, with the ERP id as a metafield.
+     *
+     * @param array<string,mixed> $data a customer record (defaults to {@see SAMPLE})
      */
-    public function create(): array
+    public function create(array $data = self::SAMPLE): array
     {
         return $this->shopify->customers()->create(
-            CustomerInput::make('jane@example.com')
-                ->firstName('Jane')
-                ->lastName('Doe')
-                ->tags(['vip'])
-                ->metafield(Metafield::text('erp', 'customer_id', 'C-1001')),
+            CustomerInput::make($data['email'])
+                ->firstName($data['firstName'])
+                ->lastName($data['lastName'])
+                ->tags($data['tags'])
+                ->note($data['note'])
+                ->metafield(Metafield::text('erp', 'customer_id', $data['erpId'])),
         );
     }
 
     /**
-     * Partial update — here just appending a note. The id is injected for you.
+     * Partial update — here updating the note. The id is injected for you.
+     *
+     * @param array<string,mixed> $data the record carrying the new values
      */
-    public function update(string $customerId): array
+    public function update(string $customerId, array $data = self::SAMPLE): array
     {
-        return $this->shopify->customers()->update($customerId, CustomerInput::make()->note('Called 2026-06-19'));
+        return $this->shopify->customers()->update($customerId, CustomerInput::make()->note($data['note']));
     }
 
     /**
@@ -74,8 +101,7 @@ final class CustomerExamples
     }
 
     /**
-     * Search with Shopify query syntax, walking every page. Pass `withAddresses`
-     * to include each customer's full address list inline.
+     * Search with Shopify query syntax, walking every page (addresses inline).
      */
     public function searchByTag(): array
     {
@@ -83,29 +109,35 @@ final class CustomerExamples
     }
 
     /**
-     * Upsert metafields on the customer (create-or-update by namespace+key).
+     * Upsert the ERP id onto the customer as a metafield.
+     *
+     * @param array<string,mixed> $data a customer record (uses its `erpId`)
      */
-    public function setMetafields(string $customerId): array
+    public function setMetafields(string $customerId, array $data = self::SAMPLE): array
     {
         return $this->shopify->customers()->setMetafields($customerId, [
-            Metafield::text('erp', 'customer_id', 'C-1001'),
+            Metafield::text('erp', 'customer_id', $data['erpId']),
         ]);
     }
 
     // --- Addresses (customerAddressCreate / Update / Delete) ---
 
     /**
-     * Add a mailing address and make it the default. `Address` is a builder that
-     * uses Shopify's code fields (`countryCode`, `provinceCode`).
-     * Result: `['address' => ['id' => …], 'userErrors' => [...]]`.
+     * Add the record's address and make it the default. `Address` uses Shopify's
+     * code fields (`countryCode`, `provinceCode`).
+     *
+     * @param array<string,mixed> $data a customer record (uses its `address`)
      */
-    public function addAddress(string $customerId): array
+    public function addAddress(string $customerId, array $data = self::SAMPLE): array
     {
+        $a = $data['address'];
+
         return $this->shopify->customers()->addAddress(
             $customerId,
             Address::make()
-                ->firstName('Jane')->lastName('Doe')
-                ->address1('500 Congress Ave')->city('Austin')->provinceCode('TX')->zip('78701')->countryCode('US'),
+                ->firstName($data['firstName'])->lastName($data['lastName'])
+                ->address1($a['address1'])->city($a['city'])
+                ->provinceCode($a['provinceCode'])->zip($a['zip'])->countryCode($a['countryCode']),
             setAsDefault: true,
         );
     }
@@ -120,10 +152,12 @@ final class CustomerExamples
 
     /**
      * Update one address (partial — only the fields you set change).
+     *
+     * @param array<string,mixed> $data a record carrying the new address values
      */
-    public function updateAddress(string $customerId, string $addressId): array
+    public function updateAddress(string $customerId, string $addressId, array $data = self::SAMPLE): array
     {
-        return $this->shopify->customers()->updateAddress($customerId, $addressId, Address::make()->city('Dallas'));
+        return $this->shopify->customers()->updateAddress($customerId, $addressId, Address::make()->city($data['address']['city']));
     }
 
     /**

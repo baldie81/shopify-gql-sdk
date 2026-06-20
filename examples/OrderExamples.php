@@ -12,30 +12,63 @@ use Baldie81\ShopifyGraphQL\Support\Metafield;
  *
  *   $ex = new OrderExamples(ExampleClient::create());
  *
- * Operations shown in this file:
- *   - get()               — read one order (totals, statuses, customer)
- *   - findPaidUnfulfilled()— search with Shopify order query syntax (paginated)
- *   - fulfill()           — fulfil all open fulfillment orders, with tracking
- *   - refund()            — partial/whole refund (returns money via `transactions`)
- *   - writeErpState()     — write ERP sync state back onto the order via metafields
+ * Real-life usage: the order id comes from Shopify; the write payload comes from
+ * elsewhere and is passed as `$data` (defaults provided). Mixed provenance here:
+ *   - fulfill() takes a **shipment record** (tracking) from your 3PL/ERP;
+ *   - writeErpState() takes the **ERP result** to stamp back onto the order;
+ *   - refund() takes a **refund instruction** whose gateway/transaction/line-item
+ *     ids reference the order you fetched from Shopify.
  *
- * Important model notes:
- *   - Orders are **not created here** — they come from checkout, or you create a
- *     DRAFT order and complete it. This class is for managing existing orders.
- *   - `fulfill()` is the simple "ship the whole order" path. The deeper
- *     fulfillment-order lifecycle (holds, moves, partial/line-item fulfilment,
- *     3PL request flow) lives in FulfillmentOrderExamples.
- *   - A `refund()` moves real money only when you pass `transactions` (a gateway
- *     REFUND against the order's parent transaction); without them it records an
- *     accounting-only refund. On API **2026-04+** the SDK adds the mandatory
- *     `@idempotent` directive automatically.
- *   - Order metafields are API-visible immediately, but only show in the **admin**
- *     once an ORDER metafield *definition* exists — see MetafieldDefinitionExamples.
+ *   foreach ($shopify->orders()->searchAll('fulfillment_status:unfulfilled') as $o) {
+ *       $ex->fulfill($o['id'], $threePl->shipmentFor($o['name']));
+ *   }
+ *
+ * Operations shown in this file:
+ *   - get($orderId)                — read one order
+ *   - findPaidUnfulfilled()        — search (paginated)
+ *   - fulfill($orderId, $shipment) — fulfil open fulfillment orders, with tracking
+ *   - refund($orderId, $refund)    — partial/whole refund (returns money)
+ *   - writeErpState($orderId, $erp)— stamp ERP sync state onto the order (metafields)
+ *
+ * Model notes:
+ *   - Orders are **not created here** — they come from checkout or draft orders.
+ *   - `fulfill()` is the "ship the whole order" path; the deeper fulfillment-order
+ *     lifecycle lives in FulfillmentOrderExamples.
+ *   - `refund()` moves real money only when `transactions` are present (a gateway
+ *     REFUND against the parent transaction). On API **2026-04+** the SDK adds the
+ *     mandatory `@idempotent` directive automatically.
+ *   - Order metafields only show in the admin once an ORDER *definition* exists —
+ *     see MetafieldDefinitionExamples.
  *
  * Related: FulfillmentOrderExamples, MetafieldDefinitionExamples, CustomerExamples.
  */
 final class OrderExamples
 {
+    /** A shipment record, as it might arrive from a 3PL/ERP. */
+    private const SHIPMENT = [
+        'number'  => '1Z999AA10123456784',
+        'company' => 'UPS',
+        'url'     => 'https://www.ups.com/track?tracknum=1Z999AA10123456784',
+    ];
+
+    /** A refund instruction (ids/gateway reference the fetched Shopify order). */
+    private const REFUND = [
+        'lineItemId'          => 'gid://shopify/LineItem/123',
+        'quantity'            => 1,
+        'restockType'         => 'NO_RESTOCK',
+        'note'                => 'Damaged item',
+        'gateway'             => 'Bank Deposit',
+        'parentTransactionId' => 'gid://shopify/OrderTransaction/123',
+        'amount'              => '40.00',
+    ];
+
+    /** The result of pushing the order to the ERP. */
+    private const ERP_RESULT = [
+        'orderId' => 'SO-1001',
+        'synced'  => true,
+        'message' => 'Sent to ERP OK',
+    ];
+
     public function __construct(private readonly ShopifyClient $shopify) {}
 
     /**
@@ -48,7 +81,7 @@ final class OrderExamples
     }
 
     /**
-     * Search with Shopify order query syntax.
+     * Search with Shopify order query syntax, walking every page.
      */
     public function findPaidUnfulfilled(): array
     {
@@ -56,49 +89,54 @@ final class OrderExamples
     }
 
     /**
-     * Fulfill all open fulfillment orders, with tracking. `notifyCustomer` sends
-     * the shipping-confirmation email.
+     * Fulfil all open fulfillment orders with the shipment's tracking.
+     * `notifyCustomer` sends the shipping-confirmation email.
+     *
+     * @param array<string,mixed> $data a shipment record (defaults to {@see SHIPMENT})
      */
-    public function fulfill(string $orderId): array
+    public function fulfill(string $orderId, array $data = self::SHIPMENT): array
     {
         return $this->shopify->orders()->fulfill(
             $orderId,
-            ['number' => '1Z999AA10123456784', 'company' => 'UPS', 'url' => 'https://www.ups.com/track?tracknum=1Z999AA10123456784'],
+            ['number' => $data['number'], 'company' => $data['company'], 'url' => $data['url']],
             notifyCustomer: true,
         );
     }
 
     /**
-     * Partial refund of one line-item unit. `transactions` actually returns the
-     * money via the gateway; omit it to record an accounting-only refund.
-     * On 2026-04+ the SDK adds the mandatory `@idempotent` directive for you.
+     * Apply a refund instruction. `transactions` returns the money via the
+     * gateway; omit it to record an accounting-only refund.
+     *
+     * @param array<string,mixed> $data a refund instruction (defaults to {@see REFUND})
      */
-    public function refund(string $orderId, string $lineItemId, string $gateway, string $parentTransactionId, string $amount): array
+    public function refund(string $orderId, array $data = self::REFUND): array
     {
         return $this->shopify->orders()->refund($orderId, [
-            'note'            => 'Damaged item',
+            'note'            => $data['note'],
             'notify'          => false,
-            'refundLineItems' => [['lineItemId' => $lineItemId, 'quantity' => 1, 'restockType' => 'NO_RESTOCK']],
+            'refundLineItems' => [['lineItemId' => $data['lineItemId'], 'quantity' => $data['quantity'], 'restockType' => $data['restockType']]],
             'transactions'    => [[
                 'orderId'  => $orderId,
-                'gateway'  => $gateway,
+                'gateway'  => $data['gateway'],
                 'kind'     => 'REFUND',
-                'amount'   => $amount,
-                'parentId' => $parentTransactionId,
+                'amount'   => $data['amount'],
+                'parentId' => $data['parentTransactionId'],
             ]],
         ]);
     }
 
     /**
-     * Write ERP sync state onto the order (define these as ORDER metafield
+     * Stamp the ERP result back onto the order (define these as ORDER metafield
      * definitions so they show in the admin — see MetafieldDefinitionExamples).
+     *
+     * @param array<string,mixed> $data the ERP result (defaults to {@see ERP_RESULT})
      */
-    public function writeErpState(string $orderId, string $erpOrderId): array
+    public function writeErpState(string $orderId, array $data = self::ERP_RESULT): array
     {
         return $this->shopify->orders()->setMetafields($orderId, [
-            Metafield::text('erp', 'order_id', $erpOrderId),
-            Metafield::boolean('erp', 'synced', true),
-            Metafield::text('erp', 'message', 'Sent to ERP OK'),
+            Metafield::text('erp', 'order_id', $data['orderId']),
+            Metafield::boolean('erp', 'synced', $data['synced']),
+            Metafield::text('erp', 'message', $data['message']),
         ]);
     }
 }

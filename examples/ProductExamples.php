@@ -13,86 +13,121 @@ use Baldie81\ShopifyGraphQL\Support\ProductInput;
  * PRODUCTS — the core catalog object: the sellable item plus its options, media,
  * SEO, status and metafields. Reached via `$shopify->products()`.
  *
- * Getting a client:
- *   $shopify = ExampleClient::create();          // edit the dummy creds first
+ *   $shopify = ExampleClient::create();      // edit the dummy creds first
  *   $ex      = new ProductExamples($shopify);
- *   $ex->create();
+ *
+ * Real-life usage: a write method takes **one product record** as `$data`
+ * (mock-shaped here like an ERP payload, defaulting to {@see SAMPLE} so it runs
+ * as-is). In a real importer you'd loop your feed and pass one record per call:
+ *
+ *   foreach ($erp->products() as $record) {
+ *       $ex->create($record);
+ *   }
+ *
+ * Shopify object ids (productId) stay as separate params — you'd have those from
+ * Shopify or your ERP↔Shopify id map.
  *
  * Operations shown in this file:
- *   - create()        — productCreate from a ProductInput builder (+ inline metafield)
- *   - update()        — productUpdate; partial, only the fields you set are sent
- *   - set()           — productSet: declare options + variants in one idempotent call
- *   - delete()        — productDelete (returns deletedProductId)
- *   - get()           — read one product (numeric id or GID)
- *   - searchPage()    — one page + the cursor for the next
- *   - searchAll()     — every page, cursor pagination handled for you
- *   - setMetafields() — upsert metafields (auto-chunked at 25)
- *   - findBySku()     — resolve a product GID from a variant SKU
+ *   - create($data)             — productCreate from an ERP record (+ metafield)
+ *   - update($productId, $data) — productUpdate; partial, only fields you set
+ *   - set($data)                — productSet: options + variants from the record
+ *   - delete($productId)        — productDelete (returns deletedProductId)
+ *   - get($productId)           — read one product (numeric id or GID)
+ *   - searchPage()              — one page + the cursor for the next
+ *   - searchAll()               — every page, cursor pagination handled
+ *   - setMetafields($productId, $data) — upsert the record's custom attributes
+ *   - findBySku($data)          — resolve a product GID from the ERP SKU
  *
  * Conventions used across the SDK:
  *   - IDs accept a numeric id OR a full `gid://shopify/Product/123`; the SDK coerces.
  *   - Writes return `['<root> => ..., 'userErrors' => [...]]`. Validation problems
  *     come back in `userErrors` (NOT as exceptions); only transport / throttling /
  *     non-2xx HTTP throw (TransportException / ThrottledException / GraphQLException).
- *   - Reads use a lean selection set; reach for raw `$shopify->graphql()` if you
- *     need fields the helpers don't select.
  *   - Builders (`ProductInput`, `Metafield`, …) are `Arrayable`; write methods
  *     accept either a builder or a plain array.
  *
  * Related: variants & prices → VariantExamples; stock → InventoryExamples;
- * images → product media on the Products resource; localisation →
- * TranslationExamples; grouping → CollectionExamples; making metafields show in
- * the admin → MetafieldDefinitionExamples; mass updates → BulkOperationExamples.
+ * localisation → TranslationExamples; grouping → CollectionExamples; making
+ * metafields show in the admin → MetafieldDefinitionExamples; mass updates →
+ * BulkOperationExamples.
  */
 final class ProductExamples
 {
+    /** One product record, shaped like an ERP payload. */
+    private const SAMPLE = [
+        'sku'             => 'TEE-001',
+        'title'           => 'Organic Cotton Tee',
+        'descriptionHtml' => '<p>Soft, breathable organic cotton.</p>',
+        'vendor'          => 'Acme',
+        'type'            => 'Shirts',
+        'tags'            => ['organic', 'tee'],
+        'status'          => 'ACTIVE',
+        'price'           => '19.90',
+        'options'         => ['Color' => ['Red', 'Blue']],
+        'metafields'      => [
+            'care'            => 'Machine wash cold',
+            'featured'        => true,
+            'warranty_months' => 24,
+            'specs'           => ['weight' => '180g', 'fit' => 'regular'],
+        ],
+    ];
+
     public function __construct(private readonly ShopifyClient $shopify) {}
 
     /**
-     * Create a product with a couple of fields and an inline metafield.
+     * Create a product by mapping one ERP record onto a ProductInput builder.
+     *
+     * @param array<string,mixed> $data one product record (defaults to {@see SAMPLE})
      */
-    public function create(): array
+    public function create(array $data = self::SAMPLE): array
     {
-        $input = ProductInput::make('SDK Example Tee')
-            ->descriptionHtml('<p>Created via the SDK.</p>')
-            ->vendor('Acme')
-            ->productType('Shirts')
-            ->tags(['example', 'sdk'])
-            ->status(ProductStatus::Active)
-            ->metafield(Metafield::text('custom', 'care', 'Machine wash cold'));
+        $input = ProductInput::make($data['title'])
+            ->descriptionHtml($data['descriptionHtml'])
+            ->vendor($data['vendor'])
+            ->productType($data['type'])
+            ->tags($data['tags'])
+            ->status($data['status'])
+            ->metafield(Metafield::text('custom', 'care', $data['metafields']['care']));
 
-        $result = $this->shopify->products()->create($input);
-        // $result['product']['id'], $result['product']['legacyResourceId'], $result['userErrors']
-        return $result;
+        return $this->shopify->products()->create($input);
     }
 
     /**
-     * Partial update — only the fields you set are sent.
+     * Partial update — only the fields you set are sent. `$productId` comes from
+     * Shopify (e.g. looked up from your ERP↔Shopify id map).
+     *
+     * @param array<string,mixed> $data the record carrying the new values
      */
-    public function update(string $productId): array
+    public function update(string $productId, array $data = self::SAMPLE): array
     {
         return $this->shopify->products()->update(
             $productId,
-            ProductInput::make()->title('SDK Example Tee (v2)')->status(ProductStatus::Draft),
+            ProductInput::make()->title($data['title'])->status(ProductStatus::Draft),
         );
     }
 
     /**
-     * `productSet` — declare options and variants in one idempotent call. Useful
-     * for importing a product whose full shape you already know.
+     * `productSet` — declare options and variants in one idempotent call, built
+     * from the record's option matrix (e.g. Color => [Red, Blue]).
+     *
+     * @param array<string,mixed> $data one product record
      */
-    public function set(): array
+    public function set(array $data = self::SAMPLE): array
     {
+        $optionName = array_key_first($data['options']); // 'Color'
+        $values     = $data['options'][$optionName];     // ['Red', 'Blue']
+
         return $this->shopify->products()->set([
-            'title'         => 'SDK Example Polo',
-            'status'        => 'ACTIVE',
+            'title'          => $data['title'],
+            'status'         => $data['status'],
             'productOptions' => [
-                ['name' => 'Color', 'values' => [['name' => 'Red'], ['name' => 'Blue']]],
+                ['name' => $optionName, 'values' => array_map(static fn (string $v): array => ['name' => $v], $values)],
             ],
-            'variants' => [
-                ['optionValues' => [['optionName' => 'Color', 'name' => 'Red']], 'price' => '19.90', 'sku' => 'POLO-RED'],
-                ['optionValues' => [['optionName' => 'Color', 'name' => 'Blue']], 'price' => '19.90', 'sku' => 'POLO-BLUE'],
-            ],
+            'variants' => array_map(static fn (string $v): array => [
+                'optionValues' => [['optionName' => $optionName, 'name' => $v]],
+                'price'        => $data['price'],
+                'sku'          => $data['sku'] . '-' . strtoupper($v),
+            ], $values),
         ]);
     }
 
@@ -128,27 +163,34 @@ final class ProductExamples
      */
     public function searchAll(): array
     {
-        return $this->shopify->products()->searchAll('tag:sdk');
+        return $this->shopify->products()->searchAll('tag:organic');
     }
 
     /**
-     * Upsert metafields (create-or-update by namespace+key), auto-chunked at 25.
+     * Upsert one record's custom attributes as metafields (chunked at 25).
+     *
+     * @param array<string,mixed> $data one product record (uses its `metafields`)
      */
-    public function setMetafields(string $productId): array
+    public function setMetafields(string $productId, array $data = self::SAMPLE): array
     {
+        $mf = $data['metafields'];
+
         return $this->shopify->products()->setMetafields($productId, [
-            Metafield::text('custom', 'care', 'Hand wash'),
-            Metafield::boolean('custom', 'featured', true),
-            Metafield::integer('custom', 'warranty_months', 24),
-            Metafield::json('custom', 'specs', ['weight' => '180g', 'fit' => 'regular']),
+            Metafield::text('custom', 'care', $mf['care']),
+            Metafield::boolean('custom', 'featured', $mf['featured']),
+            Metafield::integer('custom', 'warranty_months', $mf['warranty_months']),
+            Metafield::json('custom', 'specs', $mf['specs']),
         ]);
     }
 
     /**
-     * Resolve a product GID from a variant SKU (null if not found).
+     * Resolve a product GID from the record's SKU (null if not found) — the usual
+     * way to map an ERP record to its Shopify product.
+     *
+     * @param array<string,mixed> $data one product record (uses its `sku`)
      */
-    public function findBySku(string $sku): ?string
+    public function findBySku(array $data = self::SAMPLE): ?string
     {
-        return $this->shopify->products()->findIdBySku($sku);
+        return $this->shopify->products()->findIdBySku($data['sku']);
     }
 }

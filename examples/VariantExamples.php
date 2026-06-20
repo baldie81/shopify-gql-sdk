@@ -14,27 +14,40 @@ use Baldie81\ShopifyGraphQL\Support\VariantInput;
  *
  *   $ex = new VariantExamples(ExampleClient::create());
  *
+ * Real-life usage: a write method takes **one variant/price row** as `$data` (an
+ * ERP price feed row, defaulting to {@see SAMPLE}). Product/variant ids stay as
+ * params — you'd have them from Shopify. Typical loop:
+ *
+ *   foreach ($erp->priceRows() as $row) {
+ *       $ex->update($row['productId'], $row['variantId'], $row);
+ *   }
+ *
  * Operations shown in this file:
- *   - list()    — a product's variants (id, sku, price, compareAtPrice, inventory item)
- *   - update()  — productVariantsBulkUpdate via the VariantInput builder
- *   - create()  — productVariantsBulkCreate (the product's options must already exist)
- *   - delete()  — productVariantsBulkDelete (a product must keep ≥1 variant)
+ *   - list($productId)                       — a product's variants
+ *   - update($productId, $variantId, $data)  — productVariantsBulkUpdate from a price row
+ *   - create($productId, $data)              — productVariantsBulkCreate (options must exist)
+ *   - delete($productId, $variantId)         — productVariantsBulkDelete (keep ≥1 variant)
  *
  * Key points:
- *   - The bulk mutations are **product-scoped** (you pass the productId) and the
- *     SDK **auto-chunks at 250** variants per call, merging the results.
+ *   - The bulk mutations are **product-scoped** and **auto-chunk at 250** variants.
  *   - This is for *prices* and *variant attributes*. Variant **quantities** live
- *     in InventoryExamples; per-market/B2B prices live in PriceListExamples.
- *   - To add a variant, the matching option (e.g. Color=Green) must exist — define
- *     options up front with `products()->set()` (see ProductExamples::set()).
- *   - `VariantInput` formats money for you; `tracked(true)` is required before a
- *     quantity will stick (then stock it via InventoryExamples).
+ *     in InventoryExamples; per-market/B2B prices in PriceListExamples.
+ *   - To add a variant, the matching option (e.g. Color=Green) must already exist
+ *     — define options with `products()->set()` (see ProductExamples::set()).
  *
- * Related: ProductExamples (options/`set`), InventoryExamples (stock),
- * PriceListExamples (contextual pricing).
+ * Related: ProductExamples, InventoryExamples, PriceListExamples.
  */
 final class VariantExamples
 {
+    /** One variant/price row, shaped like an ERP feed row. */
+    private const SAMPLE = [
+        'sku'            => 'POLO-RED',
+        'price'          => '24.90',
+        'compareAtPrice' => '29.90',
+        'newColor'       => 'Green',
+        'newColorPrice'  => '19.90',
+    ];
+
     public function __construct(private readonly ShopifyClient $shopify) {}
 
     /**
@@ -46,28 +59,32 @@ final class VariantExamples
     }
 
     /**
-     * Update existing variants — set a sale price and mark them tracked.
+     * Apply one ERP price row to an existing variant (sale price + tracking).
+     *
+     * @param array<string,mixed> $data a price row (defaults to {@see SAMPLE})
      */
-    public function update(string $productId, string $variantId): array
+    public function update(string $productId, string $variantId, array $data = self::SAMPLE): array
     {
         return $this->shopify->variants()->update($productId, [
             VariantInput::make($variantId)
-                ->price(24.90)
-                ->compareAtPrice(29.90)
+                ->price($data['price'])
+                ->compareAtPrice($data['compareAtPrice'])
                 ->tracked(true),
         ]);
     }
 
     /**
-     * Add a new variant to a product whose options already exist.
+     * Add a new variant (from the record) to a product whose options exist.
+     *
+     * @param array<string,mixed> $data a record with the new option value + price
      */
-    public function create(string $productId): array
+    public function create(string $productId, array $data = self::SAMPLE): array
     {
         return $this->shopify->variants()->create($productId, [
             [
-                'optionValues' => [['optionName' => 'Color', 'name' => 'Green']],
-                'price'        => '19.90',
-                'inventoryItem' => ['sku' => 'POLO-GREEN', 'tracked' => true],
+                'optionValues'  => [['optionName' => 'Color', 'name' => $data['newColor']]],
+                'price'         => $data['newColorPrice'],
+                'inventoryItem' => ['sku' => 'POLO-' . strtoupper($data['newColor']), 'tracked' => true],
             ],
         ]);
     }

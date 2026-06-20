@@ -12,50 +12,68 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
  *
  *   $ex = new FileExamples(ExampleClient::create());
  *
+ * Real-life usage: a write method takes **one media record** as `$data` (a local
+ * path / alt text coming from your DAM/ERP, defaulting to {@see SAMPLE}). Typical
+ * loop:
+ *
+ *   foreach ($erp->productImages() as $image) {
+ *       $url = $ex->upload($image);   // then attach $url as product media
+ *   }
+ *
  * Operations shown in this file:
- *   - upload()     — upload one local file; returns its resource URL
- *   - uploadMany() — upload several; returns a path => URL map
- *   - updateAlt()  — fileUpdate: change a file's alt text (or replace its source)
+ *   - upload($data)            — upload one local file; returns its resource URL
+ *   - uploadMany($data)        — upload several; returns a path => URL map
+ *   - updateAlt($fileId, $data)— fileUpdate: change a file's alt text
  *
  * Notes:
  *   - A staged upload is two steps under the hood (reserve a target, PUT the
  *     bytes); `upload()` does both and hands back a URL usable as a media source.
- *   - Attaching images to a product (and idempotent media sync / reorder / prune)
- *     lives on the Products resource, not here.
- *   - `stageJsonl()` (used by bulk imports) is also on this resource.
+ *   - Attaching images to a product (idempotent media sync / reorder / prune) is
+ *     on the Products resource, not here. `stageJsonl()` (bulk imports) is here too.
  *
  * Related: ProductExamples (product media), BulkOperationExamples.
  */
 final class FileExamples
 {
+    /** A media record, as it might come from your DAM/ERP. */
+    private const SAMPLE = [
+        'path'  => '/path/to/SKU_1.jpg',
+        'paths' => ['/path/to/SKU_1.jpg', '/path/to/SKU_2.jpg'],
+        'alt'   => 'Front view',
+    ];
+
     public function __construct(private readonly ShopifyClient $shopify) {}
 
     /**
      * Upload one local file; returns its resource URL (usable as a media source).
+     *
+     * @param array<string,mixed> $data a media record (uses its `path`)
      */
-    public function upload(string $path): string
+    public function upload(array $data = self::SAMPLE): string
     {
-        return $this->shopify->files()->upload($path);
+        return $this->shopify->files()->upload($data['path']);
     }
 
     /**
      * Upload several files at once.
      *
-     * @param list<string> $paths
+     * @param array<string,mixed> $data a media record (uses its `paths`)
      * @return array<string,string> path => resource URL
      */
-    public function uploadMany(array $paths): array
+    public function uploadMany(array $data = self::SAMPLE): array
     {
-        return $this->shopify->files()->uploadMany($paths);
+        return $this->shopify->files()->uploadMany($data['paths']);
     }
 
     /**
      * Update a file in place — e.g. change its alt text (`fileUpdate`).
+     *
+     * @param array<string,mixed> $data a media record (uses its `alt`)
      */
-    public function updateAlt(string $fileId, string $alt): array
+    public function updateAlt(string $fileId, array $data = self::SAMPLE): array
     {
         return $this->shopify->files()->update([
-            ['id' => $fileId, 'alt' => $alt],
+            ['id' => $fileId, 'alt' => $data['alt']],
         ]);
     }
 }

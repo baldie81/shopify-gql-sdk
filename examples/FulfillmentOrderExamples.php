@@ -12,21 +12,24 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
  *
  *   $ex = new FulfillmentOrderExamples(ExampleClient::create());
  *
- * What a FulfillmentOrder is: the unit of fulfillment work for some of an order's
- * line items at ONE location / fulfillment service. An order can have several.
- * Start from `forOrder($orderId)` to get the ids the operations below need.
+ * Real-life usage: fulfillment-order ids come from Shopify (`forOrder()`); the
+ * operation details (hold reason, reschedule date, …) are passed as `$data`
+ * (defaults provided). Typical loop:
+ *
+ *   foreach ($shopify->fulfillmentOrders()->forOrder($orderId) as $fo) {
+ *       $ex->holdThenRelease($fo['id'], $erp->holdInstruction($fo['id']));
+ *   }
  *
  * Operations shown in this file:
- *   - forOrder() / get()           — list an order's fulfillment orders / read one
- *   - holdThenRelease()            — hold (e.g. awaiting stock) then releaseHold
- *   - move()                       — reassign to another location
- *   - reschedule()                 — change a SCHEDULED one's fulfil-at datetime
- *   - cancel() / closeIncomplete() — cancel, or mark incomplete
- *   - requestFulfillment() / acceptFulfillment() — 3PL request flow
+ *   - forOrder($orderId) / get($foId)        — list an order's FOs / read one
+ *   - holdThenRelease($foId, $data)          — hold then releaseHold
+ *   - move($foId, $newLocationId)            — reassign to another location
+ *   - reschedule($foId, $data)               — change a SCHEDULED FO's fulfil-at
+ *   - cancel($foId) / closeIncomplete($foId, $data)
+ *   - requestFulfillment($foId, $data) / acceptFulfillment($foId) — 3PL flow
  *
  * Also on the resource (not shown here): open(), merge(), split(),
- * rejectFulfillmentRequest(), and the cancellation-request trio
- * (submit/accept/reject).
+ * rejectFulfillmentRequest(), and the cancellation-request trio.
  *
  * Notes:
  *   - Most mutations require a compatible state (e.g. you can only hold an OPEN
@@ -38,11 +41,21 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
  */
 final class FulfillmentOrderExamples
 {
+    /** Operation details, as they might come from your ERP/ops system. */
+    private const SAMPLE = [
+        'holdReason'   => 'INVENTORY_OUT_OF_STOCK',
+        'reasonNotes'  => 'Awaiting restock',
+        'holdHandle'   => 'erp-sync',
+        'fulfillAt'    => '2026-07-01T10:00:00Z',
+        'closeMessage' => 'Cannot fulfil remaining items',
+        'requestNote'  => 'Please ship ASAP',
+    ];
+
     public function __construct(private readonly ShopifyClient $shopify) {}
 
     /**
-     * The fulfillment orders for an order — each represents work at one location
-     * or fulfillment service. Start here to get ids for the operations below.
+     * The fulfillment orders for an order — each is work at one location/service.
+     * Start here to get the ids the operations below need.
      */
     public function forOrder(string $orderId): array
     {
@@ -58,16 +71,18 @@ final class FulfillmentOrderExamples
     }
 
     /**
-     * Put a fulfillment order on hold (e.g. awaiting stock), then release it.
-     * `handle` lets one app place several holds and release them individually.
+     * Place a hold from the instruction, then release it. `handle` lets one app
+     * place several holds and release them individually.
+     *
+     * @param array<string,mixed> $data a hold instruction (defaults to {@see SAMPLE})
      */
-    public function holdThenRelease(string $fulfillmentOrderId): array
+    public function holdThenRelease(string $fulfillmentOrderId, array $data = self::SAMPLE): array
     {
         $hold = $this->shopify->fulfillmentOrders()->hold(
             $fulfillmentOrderId,
-            reason: 'INVENTORY_OUT_OF_STOCK',
-            reasonNotes: 'Awaiting restock',
-            handle: 'erp-sync',
+            reason: $data['holdReason'],
+            reasonNotes: $data['reasonNotes'],
+            handle: $data['holdHandle'],
         );
 
         // Omit holdIds to release every hold on the fulfillment order.
@@ -86,11 +101,13 @@ final class FulfillmentOrderExamples
     }
 
     /**
-     * Reschedule a *scheduled* fulfillment order to a future ISO-8601 datetime.
+     * Reschedule a *scheduled* fulfillment order to the instruction's datetime.
+     *
+     * @param array<string,mixed> $data uses its `fulfillAt` (ISO-8601)
      */
-    public function reschedule(string $fulfillmentOrderId): array
+    public function reschedule(string $fulfillmentOrderId, array $data = self::SAMPLE): array
     {
-        return $this->shopify->fulfillmentOrders()->reschedule($fulfillmentOrderId, '2026-07-01T10:00:00Z');
+        return $this->shopify->fulfillmentOrders()->reschedule($fulfillmentOrderId, $data['fulfillAt']);
     }
 
     /**
@@ -102,23 +119,26 @@ final class FulfillmentOrderExamples
     }
 
     /**
-     * Mark a fulfillment order incomplete (`close`) — e.g. when remaining items
-     * can't be fulfilled — with an optional reason.
+     * Mark a fulfillment order incomplete (`close`) with the instruction's reason.
+     *
+     * @param array<string,mixed> $data uses its `closeMessage`
      */
-    public function closeIncomplete(string $fulfillmentOrderId): array
+    public function closeIncomplete(string $fulfillmentOrderId, array $data = self::SAMPLE): array
     {
-        return $this->shopify->fulfillmentOrders()->close($fulfillmentOrderId, 'Cannot fulfil remaining items');
+        return $this->shopify->fulfillmentOrders()->close($fulfillmentOrderId, $data['closeMessage']);
     }
 
     /**
      * Third-party fulfillment service — step 1: request fulfillment from the
      * assigned service (optionally notifying the customer when it ships).
+     *
+     * @param array<string,mixed> $data uses its `requestNote`
      */
-    public function requestFulfillment(string $fulfillmentOrderId): array
+    public function requestFulfillment(string $fulfillmentOrderId, array $data = self::SAMPLE): array
     {
         return $this->shopify->fulfillmentOrders()->submitFulfillmentRequest(
             $fulfillmentOrderId,
-            message: 'Please ship ASAP',
+            message: $data['requestNote'],
             notifyCustomer: true,
         );
     }

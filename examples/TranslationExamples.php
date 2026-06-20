@@ -13,25 +13,36 @@ use Baldie81\ShopifyGraphQL\Support\Translation;
  *
  *   $ex = new TranslationExamples(ExampleClient::create());
  *
+ * Real-life usage: the resource id comes from Shopify; the translations come from
+ * your PIM/TMS and are passed as `$data` (locale => field => value), defaulting to
+ * {@see SAMPLE}. Typical loop:
+ *
+ *   foreach ($tms->translationsByProduct() as $productId => $byLocale) {
+ *       $ex->register($productId, $byLocale);
+ *   }
+ *
  * Operations shown in this file:
- *   - translatableContent() — what can be translated on a resource (+ digests)
- *   - setFrench()           — set one locale via a key => value map
- *   - registerMany()        — register several locale translations at once
- *   - remove()              — drop translations for given keys + locales
+ *   - translatableContent($productId)  — what's translatable (+ digests)
+ *   - setLocale($productId, $data)     — set one locale via a key => value map
+ *   - register($productId, $data)      — register several locales at once
+ *   - remove($productId)               — drop translations for keys + locales
  *
  * Notes:
- *   - Translations are keyed by the resource's translatable field keys (e.g.
- *     `title`, `body_html`, `handle`, `meta_title`).
+ *   - Keyed by the resource's translatable field keys (`title`, `body_html`, …).
  *   - Each translation needs the source field's **content digest**; the SDK looks
  *     these up and fills them for you (`register`/`set`).
  *   - The target locale must be a **published/added alternate** locale on the shop.
- *   - Product-centric alternative: `products()->setTranslations()` with
- *     `ProductField` builders.
  *
  * Related: ProductExamples (base content), MetafieldDefinitionExamples.
  */
 final class TranslationExamples
 {
+    /** Translations as they might arrive from a PIM/TMS: locale => field => value. */
+    private const SAMPLE = [
+        'fr' => ['title' => 'Tee en coton bio', 'body_html' => '<p>Coton bio doux.</p>'],
+        'es' => ['title' => 'Camiseta de algodón orgánico'],
+    ];
+
     public function __construct(private readonly ShopifyClient $shopify) {}
 
     /**
@@ -43,30 +54,39 @@ final class TranslationExamples
     }
 
     /**
-     * Set translations for one locale via a simple key => value map.
+     * Set translations for ONE locale via a simple key => value map.
+     *
+     * @param array<string,string> $values field => value (falls back to the SAMPLE locale)
      */
-    public function setFrench(string $productId): array
+    public function setLocale(string $productId, string $locale = 'fr', array $values = []): array
     {
-        return $this->shopify->translations()->set($productId, 'fr', [
-            'title'     => 'Tee d’exemple SDK',
-            'body_html' => '<p>Créé via le SDK.</p>',
-        ]);
+        if ($values === []) {
+            $values = self::SAMPLE[$locale] ?? [];
+        }
+
+        return $this->shopify->translations()->set($productId, $locale, $values);
     }
 
     /**
-     * Register several locale translations at once (digests resolved automatically).
+     * Register translations for several locales at once (digests resolved for you).
+     *
+     * @param array<string,array<string,string>> $data locale => field => value
      */
-    public function registerMany(string $productId): array
+    public function register(string $productId, array $data = self::SAMPLE): array
     {
-        return $this->shopify->translations()->register($productId, [
-            Translation::make('fr', 'title', 'Tee d’exemple SDK'),
-            Translation::make('es', 'title', 'Camiseta de ejemplo SDK'),
-        ]);
+        $translations = [];
+        foreach ($data as $locale => $fields) {
+            foreach ($fields as $key => $value) {
+                $translations[] = Translation::make($locale, $key, $value);
+            }
+        }
+
+        return $this->shopify->translations()->register($productId, $translations);
     }
 
     /**
      * Remove translations for the given field keys + locales (here the French
-     * title). Useful when a source value changes and a stale translation lingers.
+     * title) — useful when a source value changes and a stale translation lingers.
      */
     public function remove(string $productId): array
     {

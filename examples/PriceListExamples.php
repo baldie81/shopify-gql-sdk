@@ -13,41 +13,59 @@ use Baldie81\ShopifyGraphQL\Support\PriceListInput;
  *
  *   $ex = new PriceListExamples(ExampleClient::create());
  *
+ * Real-life usage: a write method takes **one pricing record** as `$data` (an ERP
+ * price-book entry, defaulting to {@see SAMPLE}). Catalog / price-list / variant
+ * ids come from Shopify (params). Typical loop:
+ *
+ *   foreach ($erp->priceBook() as $row) {
+ *       $ex->setFixedPrices($priceListId, $row['variantId'], $row);
+ *   }
+ *
  * Model: a price list is tied to a catalog's context (market / company / app) and
- * carries a relative `parent` adjustment (e.g. −20% vs. the base price). You can
- * then override individual variants with explicit FIXED prices.
+ * carries a relative `parent` adjustment (e.g. −20%); you can then override
+ * individual variants with explicit FIXED prices.
  *
  * Operations shown in this file:
- *   - create()         — priceListCreate (currency + catalog + adjustment)
- *   - list()           — all price lists (paginated)
- *   - delete()         — priceListDelete (returns deletedId)
- *   - setFixedPrices() — priceListFixedPricesAdd (override variants)
- *   - updatePrices()   — add + delete fixed prices in one call
- *   - readPrices()     — the fixed prices on a list
+ *   - create($catalogId, $data)              — priceListCreate (currency + adjustment)
+ *   - list()                                 — all price lists (paginated)
+ *   - delete($priceListId)                   — priceListDelete (deletedId)
+ *   - setFixedPrices($priceListId,$variantId,$data) — override a variant's price
+ *   - updatePrices($priceListId, $add, $del) — add + delete fixed prices in one call
+ *   - readPrices($priceListId)               — the fixed prices on a list
  *
  * Notes:
- *   - Needs a catalog/markets context — i.e. a Markets or B2B setup on the store.
+ *   - Needs a catalog/markets context — a Markets or B2B setup on the store.
  *   - Fixed-price writes **auto-chunk at 250** and coerce variant ids to GIDs.
  *   - `setFixedPrices` replaces any existing fixed price for those variants; the
- *     price currency must match the list's currency.
+ *     currency must match the list's currency.
  *
  * Related: VariantExamples (base prices), ProductExamples.
  */
 final class PriceListExamples
 {
+    /** One pricing record, shaped like an ERP price-book entry. */
+    private const SAMPLE = [
+        'name'           => 'Wholesale EUR',
+        'currency'       => 'EUR',
+        'discountPct'    => 20,
+        'price'          => '15.00',
+        'compareAtPrice' => '19.90',
+    ];
+
     public function __construct(private readonly ShopifyClient $shopify) {}
 
     /**
-     * Create a EUR price list at 20% off, attached to a catalog (the markets/B2B
-     * catalog id). Result: `['priceList' => ['id' => …], 'userErrors' => [...]]`.
+     * Create a price list from the record, attached to a catalog (markets/B2B id).
+     *
+     * @param array<string,mixed> $data a pricing record (defaults to {@see SAMPLE})
      */
-    public function create(string $catalogId): array
+    public function create(string $catalogId, array $data = self::SAMPLE): array
     {
         return $this->shopify->priceLists()->create(
-            PriceListInput::make('Wholesale EUR')
-                ->currency('EUR')
+            PriceListInput::make($data['name'])
+                ->currency($data['currency'])
                 ->catalogId($catalogId)
-                ->adjustment('PERCENTAGE_DECREASE', 20),
+                ->adjustment('PERCENTAGE_DECREASE', (float) $data['discountPct']),
         );
     }
 
@@ -68,16 +86,18 @@ final class PriceListExamples
     }
 
     /**
-     * Override variants with fixed prices (replaces any existing fixed price for
-     * those variants). Variant ids may be numeric or GIDs.
+     * Override a variant with the record's fixed price (replaces any existing fixed
+     * price). Variant ids may be numeric or GIDs.
+     *
+     * @param array<string,mixed> $data a pricing record (uses `price`/`compareAtPrice`/`currency`)
      */
-    public function setFixedPrices(string $priceListId, string $variantId): array
+    public function setFixedPrices(string $priceListId, string $variantId, array $data = self::SAMPLE): array
     {
         return $this->shopify->priceLists()->setPrices($priceListId, [
             [
                 'variantId'      => $variantId,
-                'price'          => ['amount' => '15.00', 'currencyCode' => 'EUR'],
-                'compareAtPrice' => ['amount' => '19.90', 'currencyCode' => 'EUR'],
+                'price'          => ['amount' => $data['price'], 'currencyCode' => $data['currency']],
+                'compareAtPrice' => ['amount' => $data['compareAtPrice'], 'currencyCode' => $data['currency']],
             ],
         ]);
     }

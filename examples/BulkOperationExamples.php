@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Baldie81\ShopifyGraphQL\Examples;
 
+use Baldie81\ShopifyGraphQL\Enum\BulkOperationType;
 use Baldie81\ShopifyGraphQL\ShopifyClient;
 
 /**
@@ -12,13 +13,20 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
  *
  *   $ex = new BulkOperationExamples(ExampleClient::create());
  *
+ * Real-life usage: for an import you build **rows from your ERP feed** and pass
+ * the whole batch as `$data` (defaulting to {@see SAMPLE_ROWS}) — bulk is the
+ * mass-write path, so you hand it the entire set at once rather than looping:
+ *
+ *   $rows = array_map(fn ($p) => ['input' => ['id' => $p['gid'], 'title' => $p['title']]], $erp->products());
+ *   $ex->bulkUpdateProducts($rows);
+ *
  * The flow: kick off → poll to a terminal status → stream the result rows.
  * Shopify runs only ONE bulk operation of each type at a time per shop.
  *
  * Operations shown in this file:
- *   - exportProducts()     — runQuery + poll + results() (streamed, decoded JSONL)
- *   - bulkUpdateProducts() — importMutation (rows → JSONL → staged upload) + poll
- *   - currentQuery()       — inspect the current operation of a type
+ *   - exportProducts()         — runQuery + poll + results() (streamed JSONL)
+ *   - bulkUpdateProducts($rows)— importMutation (rows → JSONL → staged upload) + poll
+ *   - current($type)           — inspect the current operation (BulkOperationType)
  *
  * Notes:
  *   - `importMutation` serializes your rows to JSONL and stages them for you; one
@@ -32,6 +40,12 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
  */
 final class BulkOperationExamples
 {
+    /** A batch of update rows, as built from an ERP feed. */
+    private const SAMPLE_ROWS = [
+        ['input' => ['id' => 'gid://shopify/Product/1', 'title' => 'Updated A']],
+        ['input' => ['id' => 'gid://shopify/Product/2', 'title' => 'Updated B']],
+    ];
+
     public function __construct(private readonly ShopifyClient $shopify) {}
 
     /**
@@ -58,13 +72,13 @@ final class BulkOperationExamples
 
     /**
      * Bulk-update many products: one mutation invocation per row. `importMutation`
-     * serializes the rows to JSONL, stages them, and starts the operation.
-     * Select `id`/`userErrors` in the mutation to get them back in the result file.
+     * serializes the rows to JSONL, stages them, and starts the operation. Select
+     * `id`/`userErrors` in the mutation to get them back in the result file.
      *
      * @param list<array<string,mixed>> $rows e.g. [['input' => ['id' => …, 'title' => …]], …]
      * @return list<array<string,mixed>>
      */
-    public function bulkUpdateProducts(array $rows): array
+    public function bulkUpdateProducts(array $rows = self::SAMPLE_ROWS): array
     {
         $bulk = $this->shopify->bulkOperations();
 
@@ -85,10 +99,11 @@ final class BulkOperationExamples
     }
 
     /**
-     * Inspect or cancel the current operation of a type ("QUERY" or "MUTATION").
+     * Inspect the current bulk operation of a type — e.g. to check progress, or
+     * whether one is already running before you start another.
      */
-    public function currentQuery(): ?array
+    public function current(BulkOperationType $type = BulkOperationType::Query): ?array
     {
-        return $this->shopify->bulkOperations()->current('QUERY');
+        return $this->shopify->bulkOperations()->current($type);
     }
 }
