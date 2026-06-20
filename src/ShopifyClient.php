@@ -13,6 +13,7 @@ use Baldie81\ShopifyGraphQL\Resource\Customers;
 use Baldie81\ShopifyGraphQL\Resource\DraftOrders;
 use Baldie81\ShopifyGraphQL\Resource\Files;
 use Baldie81\ShopifyGraphQL\Resource\FulfillmentOrders;
+use Baldie81\ShopifyGraphQL\Resource\GiftCards;
 use Baldie81\ShopifyGraphQL\Resource\Inventory;
 use Baldie81\ShopifyGraphQL\Resource\MetafieldDefinitions;
 use Baldie81\ShopifyGraphQL\Resource\Orders;
@@ -20,6 +21,7 @@ use Baldie81\ShopifyGraphQL\Resource\PriceLists;
 use Baldie81\ShopifyGraphQL\Resource\Products;
 use Baldie81\ShopifyGraphQL\Resource\Translations;
 use Baldie81\ShopifyGraphQL\Resource\Variants;
+use Baldie81\ShopifyGraphQL\Resource\Webhooks;
 
 /**
  * Entry point for the SDK. Exposes the Shopify Admin GraphQL resources as
@@ -46,6 +48,8 @@ final class ShopifyClient
     private ?FulfillmentOrders $fulfillmentOrders = null;
     private ?PriceLists $priceLists = null;
     private ?DraftOrders $draftOrders = null;
+    private ?GiftCards $giftCards = null;
+    private ?Webhooks $webhooks = null;
 
     public function __construct(
         private readonly GraphQLClient $gql,
@@ -149,5 +153,15 @@ final class ShopifyClient
     public function draftOrders(): DraftOrders
     {
         return $this->draftOrders ??= new DraftOrders($this->gql);
+    }
+
+    public function giftCards(): GiftCards
+    {
+        return $this->giftCards ??= new GiftCards($this->gql);
+    }
+
+    public function webhooks(): Webhooks
+    {
+        return $this->webhooks ??= new Webhooks($this->gql);
     }
 }

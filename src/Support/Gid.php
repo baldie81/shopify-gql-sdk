@@ -60,6 +60,16 @@ final class Gid
         return self::isGid((string) $id) ? (string) $id : self::of('ProductVariant', $id);
     }
 
+    public static function giftCard(int|string $id): string
+    {
+        return self::isGid((string) $id) ? (string) $id : self::of('GiftCard', $id);
+    }
+
+    public static function webhookSubscription(int|string $id): string
+    {
+        return self::isGid((string) $id) ? (string) $id : self::of('WebhookSubscription', $id);
+    }
+
     /**
      * Extract the trailing numeric id from a GID (`gid://shopify/Product/123` → `123`).
      */
