@@ -10,6 +10,7 @@ use Baldie81\ShopifyGraphQL\GraphQL\Client as GraphQLClient;
 use Baldie81\ShopifyGraphQL\Resource\BulkOperations;
 use Baldie81\ShopifyGraphQL\Resource\Collections;
 use Baldie81\ShopifyGraphQL\Resource\Customers;
+use Baldie81\ShopifyGraphQL\Resource\DraftOrders;
 use Baldie81\ShopifyGraphQL\Resource\Files;
 use Baldie81\ShopifyGraphQL\Resource\FulfillmentOrders;
 use Baldie81\ShopifyGraphQL\Resource\Inventory;
@@ -44,6 +45,7 @@ final class ShopifyClient
     private ?Collections $collections = null;
     private ?FulfillmentOrders $fulfillmentOrders = null;
     private ?PriceLists $priceLists = null;
+    private ?DraftOrders $draftOrders = null;
 
     public function __construct(
         private readonly GraphQLClient $gql,
@@ -142,5 +144,10 @@ final class ShopifyClient
     public function priceLists(): PriceLists
     {
         return $this->priceLists ??= new PriceLists($this->gql);
+    }
+
+    public function draftOrders(): DraftOrders
+    {
+        return $this->draftOrders ??= new DraftOrders($this->gql);
     }
 }

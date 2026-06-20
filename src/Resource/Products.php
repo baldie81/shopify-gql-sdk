@@ -45,9 +45,9 @@ final class Products extends AbstractResource
      *
      * @return array<string,mixed>|null
      */
-    public function get(string $id): ?array
+    public function get(string $id, ?string $fields = null): ?array
     {
-        $query = 'query ($id: ID!) { product(id: $id) { ' . self::FIELDS . ' } }';
+        $query = 'query ($id: ID!) { product(id: $id) { ' . ($fields ?? self::FIELDS) . ' } }';
         $data  = $this->gql->execute($query, ['id' => Gid::product($id)]);
 
         return $data['product'] ?? null;
@@ -60,10 +60,10 @@ final class Products extends AbstractResource
      *
      * @return array{nodes:list<array<string,mixed>>,pageInfo:array<string,mixed>}
      */
-    public function search(string $query = '', int $first = 50, ?string $after = null): array
+    public function search(string $query = '', int $first = 50, ?string $after = null, ?string $fields = null): array
     {
         $first = max(1, min($first, self::MAX_PAGE_SIZE));
-        $data  = $this->gql->execute(self::listQuery(), [
+        $data  = $this->gql->execute(self::listQuery($fields), [
             'first' => $first,
             'after' => $after,
             'query' => $query,
@@ -78,9 +78,9 @@ final class Products extends AbstractResource
      *
      * @return list<array<string,mixed>>
      */
-    public function searchAll(string $query = '', int $pageSize = self::MAX_PAGE_SIZE): array
+    public function searchAll(string $query = '', int $pageSize = self::MAX_PAGE_SIZE, ?string $fields = null): array
     {
-        return $this->paginateNodes(self::listQuery(), ['query' => $query], 'products', $pageSize);
+        return $this->paginateNodes(self::listQuery($fields), ['query' => $query], 'products', $pageSize);
     }
 
     /**
@@ -542,10 +542,10 @@ final class Products extends AbstractResource
         ];
     }
 
-    private static function listQuery(): string
+    private static function listQuery(?string $fields = null): string
     {
         return 'query ($first: Int!, $after: String, $query: String) {'
             . ' products(first: $first, after: $after, query: $query) {'
-            . ' nodes { ' . self::FIELDS . ' } pageInfo { hasNextPage endCursor } } }';
+            . ' nodes { ' . ($fields ?? self::FIELDS) . ' } pageInfo { hasNextPage endCursor } } }';
     }
 }

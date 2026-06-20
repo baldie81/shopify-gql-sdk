@@ -27,11 +27,11 @@ final class Variants extends AbstractResource
      *
      * @return list<array<string,mixed>>
      */
-    public function list(string $productId, int $first = self::MAX_PAGE_SIZE): array
+    public function list(string $productId, int $first = self::MAX_PAGE_SIZE, ?string $fields = null): array
     {
         $first = max(1, min($first, self::MAX_PAGE_SIZE));
         $query = 'query ($id: ID!, $first: Int!) {'
-            . ' product(id: $id) { variants(first: $first) { nodes { ' . self::FIELDS . ' } } } }';
+            . ' product(id: $id) { variants(first: $first) { nodes { ' . ($fields ?? self::FIELDS) . ' } } } }';
 
         return $this->gql->execute($query, ['id' => Gid::product($productId), 'first' => $first])['product']['variants']['nodes'] ?? [];
     }

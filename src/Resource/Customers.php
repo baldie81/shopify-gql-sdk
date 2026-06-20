@@ -25,9 +25,10 @@ final class Customers extends AbstractResource
      *
      * @return array<string,mixed>|null
      */
-    public function get(string $id, bool $withAddresses = false): ?array
+    public function get(string $id, bool $withAddresses = false, ?string $fields = null): ?array
     {
-        $query = 'query ($id: ID!) { customer(id: $id) { ' . self::selection($withAddresses) . ' } }';
+        $selection = $fields ?? self::selection($withAddresses);
+        $query     = 'query ($id: ID!) { customer(id: $id) { ' . $selection . ' } }';
 
         return $this->gql->execute($query, ['id' => Gid::customer($id)])['customer'] ?? null;
     }
@@ -39,10 +40,10 @@ final class Customers extends AbstractResource
      *
      * @return array{nodes:list<array<string,mixed>>,pageInfo:array<string,mixed>}
      */
-    public function search(string $query = '', int $first = 50, ?string $after = null, bool $withAddresses = false): array
+    public function search(string $query = '', int $first = 50, ?string $after = null, bool $withAddresses = false, ?string $fields = null): array
     {
         $first = max(1, min($first, self::MAX_PAGE_SIZE));
-        $data  = $this->gql->execute(self::listQuery($withAddresses), ['first' => $first, 'after' => $after, 'query' => $query]);
+        $data  = $this->gql->execute(self::listQuery($withAddresses, $fields), ['first' => $first, 'after' => $after, 'query' => $query]);
 
         return $data['customers'] ?? ['nodes' => [], 'pageInfo' => ['hasNextPage' => false, 'endCursor' => null]];
     }
@@ -50,9 +51,9 @@ final class Customers extends AbstractResource
     /**
      * @return list<array<string,mixed>>
      */
-    public function searchAll(string $query = '', int $pageSize = self::MAX_PAGE_SIZE, bool $withAddresses = false): array
+    public function searchAll(string $query = '', int $pageSize = self::MAX_PAGE_SIZE, bool $withAddresses = false, ?string $fields = null): array
     {
-        return $this->paginateNodes(self::listQuery($withAddresses), ['query' => $query], 'customers', $pageSize);
+        return $this->paginateNodes(self::listQuery($withAddresses, $fields), ['query' => $query], 'customers', $pageSize);
     }
 
     /**
@@ -170,10 +171,10 @@ final class Customers extends AbstractResource
         return self::FIELDS . ($withAddresses ? ' addresses(first: 50) { ' . self::ADDRESS_BODY . ' }' : '');
     }
 
-    private static function listQuery(bool $withAddresses): string
+    private static function listQuery(bool $withAddresses, ?string $fields = null): string
     {
         return 'query ($first: Int!, $after: String, $query: String) {'
             . ' customers(first: $first, after: $after, query: $query) {'
-            . ' nodes { ' . self::selection($withAddresses) . ' } pageInfo { hasNextPage endCursor } } }';
+            . ' nodes { ' . ($fields ?? self::selection($withAddresses)) . ' } pageInfo { hasNextPage endCursor } } }';
     }
 }

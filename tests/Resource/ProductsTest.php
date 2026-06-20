@@ -41,6 +41,19 @@ final class ProductsTest extends MockClientTestCase
         self::assertStringContainsString('legacyResourceId', $this->body()['query']);
     }
 
+    public function testGetAcceptsCallerSuppliedSelection(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['product' => ['id' => 'gid://shopify/Product/123', 'handle' => 'hat']],
+        ]))]);
+
+        $client->products()->get('123', fields: 'id handle variants(first: 5) { nodes { id sku } }');
+
+        $query = $this->body()['query'];
+        self::assertStringContainsString('variants(first: 5)', $query);
+        self::assertStringNotContainsString('legacyResourceId', $query); // default selection replaced
+    }
+
     public function testGetReturnsNullWhenMissing(): void
     {
         $client = $this->mockClient([new Response(200, [], (string) json_encode(['data' => ['product' => null]]))]);
