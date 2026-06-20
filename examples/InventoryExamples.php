@@ -7,12 +7,33 @@ namespace Baldie81\ShopifyGraphQL\Examples;
 use Baldie81\ShopifyGraphQL\ShopifyClient;
 
 /**
- * Inventory — locations, absolute sets, delta adjustments, and activating an
- * item at a location.
+ * INVENTORY — stock levels per inventory item, per location. Reached via
+ * `$shopify->inventory()`.
  *
- * Cross-version note: on API 2026-04+ the SDK adds the mandatory `@idempotent`
- * directive and resolves the required `changeFromQuantity` for `setQuantities`
- * automatically — your calls don't change. Methods auto-chunk at 250.
+ *   $ex = new InventoryExamples(ExampleClient::create());
+ *
+ * Operations shown in this file:
+ *   - locations()             — the store's locations (pick one to stock against)
+ *   - setQuantities()         — set ABSOLUTE quantities ("this item now has N")
+ *   - adjustQuantities()      — change by a DELTA (±N)
+ *   - setWithIdempotencyKey() — same, with a caller-supplied retry-safe key
+ *   - activate()              — stock a tracked item at a location for the first time
+ *
+ * Prerequisites & semantics:
+ *   - An item must be **tracked** (`VariantInput::tracked()`) and **stocked** at the
+ *     location before a quantity sticks — `activate()` stocks it if needed.
+ *   - `setQuantities` is NOT product-scoped: one call can stock items across many
+ *     products. All methods **auto-chunk at 250** entries.
+ *   - Quantity "name" defaults to `available` (other states: `on_hand`, …).
+ *
+ * Cross-version behaviour (handled internally — your calls never change):
+ *   - On API **2026-04+** the SDK attaches the now-mandatory `@idempotent`
+ *     directive (a UUID per call/chunk; supply your own with `idempotencyKey:`),
+ *     and `setQuantities` resolves the now-required `changeFromQuantity`
+ *     (compare-and-swap) by reading current values first. On ≤2026-01 it sends
+ *     `ignoreCompareQuantity` instead.
+ *
+ * Related: VariantExamples (mark a variant tracked), ProductExamples.
  */
 final class InventoryExamples
 {

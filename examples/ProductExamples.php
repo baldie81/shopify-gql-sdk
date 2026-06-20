@@ -10,11 +10,39 @@ use Baldie81\ShopifyGraphQL\Support\Metafield;
 use Baldie81\ShopifyGraphQL\Support\ProductInput;
 
 /**
- * How to work with products: create, update, productSet, delete, read/search,
- * metafields and finding a product by SKU.
+ * PRODUCTS — the core catalog object: the sellable item plus its options, media,
+ * SEO, status and metafields. Reached via `$shopify->products()`.
  *
- * Every write returns `['<root> => ..., 'userErrors' => [...]]` — always check
- * `userErrors` (validation problems come back there, not as exceptions).
+ * Getting a client:
+ *   $shopify = ExampleClient::create();          // edit the dummy creds first
+ *   $ex      = new ProductExamples($shopify);
+ *   $ex->create();
+ *
+ * Operations shown in this file:
+ *   - create()        — productCreate from a ProductInput builder (+ inline metafield)
+ *   - update()        — productUpdate; partial, only the fields you set are sent
+ *   - set()           — productSet: declare options + variants in one idempotent call
+ *   - delete()        — productDelete (returns deletedProductId)
+ *   - get()           — read one product (numeric id or GID)
+ *   - searchPage()    — one page + the cursor for the next
+ *   - searchAll()     — every page, cursor pagination handled for you
+ *   - setMetafields() — upsert metafields (auto-chunked at 25)
+ *   - findBySku()     — resolve a product GID from a variant SKU
+ *
+ * Conventions used across the SDK:
+ *   - IDs accept a numeric id OR a full `gid://shopify/Product/123`; the SDK coerces.
+ *   - Writes return `['<root> => ..., 'userErrors' => [...]]`. Validation problems
+ *     come back in `userErrors` (NOT as exceptions); only transport / throttling /
+ *     non-2xx HTTP throw (TransportException / ThrottledException / GraphQLException).
+ *   - Reads use a lean selection set; reach for raw `$shopify->graphql()` if you
+ *     need fields the helpers don't select.
+ *   - Builders (`ProductInput`, `Metafield`, …) are `Arrayable`; write methods
+ *     accept either a builder or a plain array.
+ *
+ * Related: variants & prices → VariantExamples; stock → InventoryExamples;
+ * images → product media on the Products resource; localisation →
+ * TranslationExamples; grouping → CollectionExamples; making metafields show in
+ * the admin → MetafieldDefinitionExamples; mass updates → BulkOperationExamples.
  */
 final class ProductExamples
 {

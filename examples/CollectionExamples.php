@@ -8,12 +8,29 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
 use Baldie81\ShopifyGraphQL\Support\CollectionInput;
 
 /**
- * Collections — manual and smart (rule-based), product membership and metafields.
+ * COLLECTIONS — groupings of products, manual or smart (rule-based). Reached via
+ * `$shopify->collections()`.
  *
- * A *manual* collection is filled by hand (`addProducts`). A *smart* collection
- * fills itself from rules (`rule(...)`). Mind Shopify's asymmetry: `addProducts`
- * is synchronous, but `removeProducts`/`reorderProducts` run as async jobs you
- * poll with `job()`.
+ *   $ex = new CollectionExamples(ExampleClient::create());
+ *
+ * Operations shown in this file:
+ *   - createManual()   — a collection you fill by hand
+ *   - createSmart()    — a rule-based collection (auto-membership)
+ *   - update()         — collectionUpdate (partial)
+ *   - delete()         — collectionDelete (returns deletedCollectionId)
+ *   - addProducts()    — add to a manual collection (SYNC)
+ *   - removeProducts() — remove (ASYNC job; this method shows polling via job())
+ *   - listProducts()   — the collection's products
+ *
+ * Key points:
+ *   - Manual vs smart: `CollectionInput::rule(column, relation, condition)` makes
+ *     it smart; `disjunctive(false)` ANDs the rules, `true` ORs them.
+ *   - Membership asymmetry: `addProducts` is synchronous and returns the
+ *     collection, but `removeProducts`/`reorderProducts` run as **async jobs** —
+ *     poll the returned job with `collections()->job($id)` until `done`.
+ *   - Product ids may be numeric or GIDs.
+ *
+ * Related: ProductExamples, MetafieldDefinitionExamples (collection metafields).
  */
 final class CollectionExamples
 {

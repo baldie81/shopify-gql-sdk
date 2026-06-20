@@ -8,9 +8,30 @@ use Baldie81\ShopifyGraphQL\Enum\MetafieldType;
 use Baldie81\ShopifyGraphQL\ShopifyClient;
 
 /**
- * Metafield definitions — the admin-visible, typed declarations. A metafield set
- * without a definition is API-only; defining it makes it render (and be editable)
- * in the admin. The definition's type must match the metafields you set.
+ * METAFIELD DEFINITIONS — the admin-visible, typed declarations behind metafields.
+ * Reached via `$shopify->metafieldDefinitions()`.
+ *
+ *   $ex = new MetafieldDefinitionExamples(ExampleClient::create());
+ *
+ * Why they matter: a metafield set without a definition is **API-only** — it
+ * won't render in the admin. Define it (per owner type) and it shows up (and
+ * becomes editable) on that resource's admin page.
+ *
+ * Operations shown in this file:
+ *   - defineForProduct()      — defineProduct (single-line text)
+ *   - ensureErpOrderFields()  — idempotent ORDER setup (ignores TAKEN on re-run)
+ *   - defineForCustomer()     — defineCustomer
+ *   - defineWithValidations() — extra options (description + validations)
+ *
+ * Notes:
+ *   - Owner shortcuts `defineProduct` / `defineOrder` / `defineCustomer` wrap the
+ *     generic `define($ownerType, …)`; full control via `create($input)`.
+ *   - The definition's **type must match** the metafields you write with that key
+ *     (e.g. `Metafield::boolean(...)` → define as `boolean`).
+ *   - Re-creating an existing definition returns a `TAKEN` userError (no throw) —
+ *     treat it as "already exists" for idempotent setup.
+ *
+ * Related: ProductExamples / OrderExamples / CustomerExamples (which set the values).
  */
 final class MetafieldDefinitionExamples
 {

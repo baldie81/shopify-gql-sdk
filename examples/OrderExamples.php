@@ -8,9 +8,31 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
 use Baldie81\ShopifyGraphQL\Support\Metafield;
 
 /**
- * Orders — read/search, fulfillment, refunds, and writing integration state back
- * onto the order with metafields. Orders aren't *created* here (that's checkout
- * or draft orders); this is the management surface.
+ * ORDERS — the management surface for orders. Reached via `$shopify->orders()`.
+ *
+ *   $ex = new OrderExamples(ExampleClient::create());
+ *
+ * Operations shown in this file:
+ *   - get()               — read one order (totals, statuses, customer)
+ *   - findPaidUnfulfilled()— search with Shopify order query syntax (paginated)
+ *   - fulfill()           — fulfil all open fulfillment orders, with tracking
+ *   - refund()            — partial/whole refund (returns money via `transactions`)
+ *   - writeErpState()     — write ERP sync state back onto the order via metafields
+ *
+ * Important model notes:
+ *   - Orders are **not created here** — they come from checkout, or you create a
+ *     DRAFT order and complete it. This class is for managing existing orders.
+ *   - `fulfill()` is the simple "ship the whole order" path. The deeper
+ *     fulfillment-order lifecycle (holds, moves, partial/line-item fulfilment,
+ *     3PL request flow) lives in FulfillmentOrderExamples.
+ *   - A `refund()` moves real money only when you pass `transactions` (a gateway
+ *     REFUND against the order's parent transaction); without them it records an
+ *     accounting-only refund. On API **2026-04+** the SDK adds the mandatory
+ *     `@idempotent` directive automatically.
+ *   - Order metafields are API-visible immediately, but only show in the **admin**
+ *     once an ORDER metafield *definition* exists — see MetafieldDefinitionExamples.
+ *
+ * Related: FulfillmentOrderExamples, MetafieldDefinitionExamples, CustomerExamples.
  */
 final class OrderExamples
 {

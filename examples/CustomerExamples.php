@@ -10,12 +10,32 @@ use Baldie81\ShopifyGraphQL\Support\CustomerInput;
 use Baldie81\ShopifyGraphQL\Support\Metafield;
 
 /**
- * Customers — create / read / update, metafields (e.g. an ERP customer id), and
- * addresses via the modern dedicated address mutations.
+ * CUSTOMERS — customer records, their metafields, and mailing addresses. Reached
+ * via `$shopify->customers()`.
  *
- * `CustomerInput` is a fluent builder; only the fields you set are sent, so the
- * same builder works for both create and partial update. Addresses are managed
- * separately (Shopify deprecated setting them inline on the customer).
+ *   $ex = new CustomerExamples(ExampleClient::create());
+ *
+ * Operations shown in this file:
+ *   - create()        — customerCreate from a CustomerInput builder (+ metafield)
+ *   - update()        — customerUpdate; partial, id injected for you
+ *   - get()           — read one (withAddresses: true to include the full list)
+ *   - searchByTag()   — searchAll with Shopify query syntax (paginated)
+ *   - setMetafields() — upsert customer metafields (e.g. an ERP id)
+ *   - addAddress()    — customerAddressCreate (Address builder, optional default)
+ *   - listAddresses() — a customer's addresses (each with its id)
+ *   - updateAddress() / deleteAddress() — by address id
+ *
+ * Notes:
+ *   - `CustomerInput` only sends the fields you set, so one builder serves both
+ *     create and partial update.
+ *   - Reads include `defaultAddress` cheaply; pass `withAddresses: true` for the
+ *     full list (or call `addresses()` on demand).
+ *   - Addresses use the **dedicated** mutations (create/update/delete) — Shopify
+ *     deprecated setting addresses inline on the customer.
+ *   - IDs may be numeric or GIDs; writes report problems in `userErrors`.
+ *
+ * Related: OrderExamples (a customer's orders), MetafieldDefinitionExamples
+ * (surface customer metafields in the admin).
  */
 final class CustomerExamples
 {

@@ -8,11 +8,30 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
 use Baldie81\ShopifyGraphQL\Support\PriceListInput;
 
 /**
- * Price lists — contextual / market / B2B pricing.
+ * PRICE LISTS — contextual / market / B2B pricing. Reached via
+ * `$shopify->priceLists()`.
  *
- * A price list is tied to a catalog's context and carries a relative `parent`
- * adjustment (e.g. −20%); you can then override individual variants with *fixed*
- * prices. Fixed-price writes auto-chunk at 250 and coerce variant ids to GIDs.
+ *   $ex = new PriceListExamples(ExampleClient::create());
+ *
+ * Model: a price list is tied to a catalog's context (market / company / app) and
+ * carries a relative `parent` adjustment (e.g. −20% vs. the base price). You can
+ * then override individual variants with explicit FIXED prices.
+ *
+ * Operations shown in this file:
+ *   - create()         — priceListCreate (currency + catalog + adjustment)
+ *   - list()           — all price lists (paginated)
+ *   - delete()         — priceListDelete (returns deletedId)
+ *   - setFixedPrices() — priceListFixedPricesAdd (override variants)
+ *   - updatePrices()   — add + delete fixed prices in one call
+ *   - readPrices()     — the fixed prices on a list
+ *
+ * Notes:
+ *   - Needs a catalog/markets context — i.e. a Markets or B2B setup on the store.
+ *   - Fixed-price writes **auto-chunk at 250** and coerce variant ids to GIDs.
+ *   - `setFixedPrices` replaces any existing fixed price for those variants; the
+ *     price currency must match the list's currency.
+ *
+ * Related: VariantExamples (base prices), ProductExamples.
  */
 final class PriceListExamples
 {

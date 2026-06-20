@@ -8,10 +8,27 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
 use Baldie81\ShopifyGraphQL\Support\Translation;
 
 /**
- * Translations — translate any translatable resource (products, collections,
- * metafields…). The SDK fills the required content digests for you.
+ * TRANSLATIONS — localise any translatable resource (products, collections,
+ * metafields, …). Reached via `$shopify->translations()`.
  *
- * The locale must be a *published/added* alternate locale on the shop.
+ *   $ex = new TranslationExamples(ExampleClient::create());
+ *
+ * Operations shown in this file:
+ *   - translatableContent() — what can be translated on a resource (+ digests)
+ *   - setFrench()           — set one locale via a key => value map
+ *   - registerMany()        — register several locale translations at once
+ *   - remove()              — drop translations for given keys + locales
+ *
+ * Notes:
+ *   - Translations are keyed by the resource's translatable field keys (e.g.
+ *     `title`, `body_html`, `handle`, `meta_title`).
+ *   - Each translation needs the source field's **content digest**; the SDK looks
+ *     these up and fills them for you (`register`/`set`).
+ *   - The target locale must be a **published/added alternate** locale on the shop.
+ *   - Product-centric alternative: `products()->setTranslations()` with
+ *     `ProductField` builders.
+ *
+ * Related: ProductExamples (base content), MetafieldDefinitionExamples.
  */
 final class TranslationExamples
 {

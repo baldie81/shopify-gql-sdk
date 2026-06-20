@@ -7,14 +7,34 @@ namespace Baldie81\ShopifyGraphQL\Examples;
 use Baldie81\ShopifyGraphQL\ShopifyClient;
 
 /**
- * Fulfillment-order lifecycle — the layer beneath `orders()->fulfill()`.
+ * FULFILLMENT ORDERS — the fulfillment-order lifecycle beneath
+ * `orders()->fulfill()`. Reached via `$shopify->fulfillmentOrders()`.
  *
- * A FulfillmentOrder is the unit of fulfillment work for some of an order's line
- * items at one location / fulfillment service. This class shows the full
- * lifecycle: reads, holds, moving between locations, close/cancel/reschedule, and
- * the third-party fulfillment-service request flow. Most mutations need the
- * fulfillment order to be in a compatible state (e.g. you can only hold an OPEN
- * one) — they return `userErrors` otherwise.
+ *   $ex = new FulfillmentOrderExamples(ExampleClient::create());
+ *
+ * What a FulfillmentOrder is: the unit of fulfillment work for some of an order's
+ * line items at ONE location / fulfillment service. An order can have several.
+ * Start from `forOrder($orderId)` to get the ids the operations below need.
+ *
+ * Operations shown in this file:
+ *   - forOrder() / get()           — list an order's fulfillment orders / read one
+ *   - holdThenRelease()            — hold (e.g. awaiting stock) then releaseHold
+ *   - move()                       — reassign to another location
+ *   - reschedule()                 — change a SCHEDULED one's fulfil-at datetime
+ *   - cancel() / closeIncomplete() — cancel, or mark incomplete
+ *   - requestFulfillment() / acceptFulfillment() — 3PL request flow
+ *
+ * Also on the resource (not shown here): open(), merge(), split(),
+ * rejectFulfillmentRequest(), and the cancellation-request trio
+ * (submit/accept/reject).
+ *
+ * Notes:
+ *   - Most mutations require a compatible state (e.g. you can only hold an OPEN
+ *     one); incompatible calls come back in `userErrors`, not as exceptions.
+ *   - Use this for holds / multi-location / partial / 3PL fulfilment; for the
+ *     plain "ship the whole order" case use OrderExamples::fulfill().
+ *
+ * Related: OrderExamples.
  */
 final class FulfillmentOrderExamples
 {

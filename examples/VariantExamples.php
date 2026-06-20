@@ -8,8 +8,30 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
 use Baldie81\ShopifyGraphQL\Support\VariantInput;
 
 /**
- * Variants — prices and the inventory-item fields (sku, barcode, tracked, cost).
- * The bulk mutations are product-scoped and auto-chunk at 250.
+ * VARIANTS — a product's purchasable combinations (per option), carrying price,
+ * compareAtPrice and the inventory-item fields (sku, barcode, tracked, cost).
+ * Reached via `$shopify->variants()`.
+ *
+ *   $ex = new VariantExamples(ExampleClient::create());
+ *
+ * Operations shown in this file:
+ *   - list()    — a product's variants (id, sku, price, compareAtPrice, inventory item)
+ *   - update()  — productVariantsBulkUpdate via the VariantInput builder
+ *   - create()  — productVariantsBulkCreate (the product's options must already exist)
+ *   - delete()  — productVariantsBulkDelete (a product must keep ≥1 variant)
+ *
+ * Key points:
+ *   - The bulk mutations are **product-scoped** (you pass the productId) and the
+ *     SDK **auto-chunks at 250** variants per call, merging the results.
+ *   - This is for *prices* and *variant attributes*. Variant **quantities** live
+ *     in InventoryExamples; per-market/B2B prices live in PriceListExamples.
+ *   - To add a variant, the matching option (e.g. Color=Green) must exist — define
+ *     options up front with `products()->set()` (see ProductExamples::set()).
+ *   - `VariantInput` formats money for you; `tracked(true)` is required before a
+ *     quantity will stick (then stock it via InventoryExamples).
+ *
+ * Related: ProductExamples (options/`set`), InventoryExamples (stock),
+ * PriceListExamples (contextual pricing).
  */
 final class VariantExamples
 {
