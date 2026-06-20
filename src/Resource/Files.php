@@ -19,6 +19,9 @@ use Baldie81\ShopifyGraphQL\GraphQL\Client;
  * JSONL of bulk-mutation variables and returns its `stagedUploadPath`.
  * {@see update()} wraps `fileUpdate`, which replaces an existing file's bytes in
  * place (the "REPLACE" that avoids duplicate files).
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/stagedUploadsCreate Shopify Admin GraphQL: stagedUploadsCreate
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/fileUpdate Shopify Admin GraphQL: fileUpdate
  */
 final class Files extends AbstractResource
 {

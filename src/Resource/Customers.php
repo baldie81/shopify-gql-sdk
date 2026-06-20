@@ -11,6 +11,10 @@ use Baldie81\ShopifyGraphQL\Support\Gid;
 /**
  * Customers — get / search / create / update, plus metafields (e.g. an ERP
  * customer id). Mirrors the Products read/write shape.
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/Customer Shopify Admin GraphQL: Customer
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/customerCreate Shopify Admin GraphQL: customerCreate
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/customerAddressCreate Shopify Admin GraphQL: customerAddressCreate
  */
 final class Customers extends AbstractResource
 {

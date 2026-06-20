@@ -14,6 +14,10 @@ use Baldie81\ShopifyGraphQL\Support\Gid;
  * Note Shopify's asymmetry: `addProducts` is synchronous, while
  * `removeProducts` and `reorderProducts` run as async jobs (poll the returned
  * job's `done` via {@see Collections::job()}).
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/Collection Shopify Admin GraphQL: Collection
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/collectionCreate Shopify Admin GraphQL: collectionCreate
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/collectionAddProducts Shopify Admin GraphQL: collectionAddProducts
  */
 final class Collections extends AbstractResource
 {

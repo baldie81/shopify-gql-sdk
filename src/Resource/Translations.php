@@ -16,6 +16,9 @@ use Baldie81\ShopifyGraphQL\Support\Translation;
  * read the resource's translatable content (keys + digests), then register
  * translations against those digests. {@see set()} does both for you; the lower
  * level {@see register()} fills in any missing digests automatically.
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/translationsRegister Shopify Admin GraphQL: translationsRegister
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/TranslatableResource Shopify Admin GraphQL: TranslatableResource
  */
 final class Translations extends AbstractResource
 {

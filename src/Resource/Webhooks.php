@@ -15,6 +15,10 @@ use Baldie81\ShopifyGraphQL\Support\Gid;
  * `pubsub://project:topic` / EventBridge ARN for those transports. Shopify added
  * `uri` in 2025-10 (replacing `callbackUrl`); the SDK keeps your call the same
  * and maps to `callbackUrl` automatically on ≤2025-07.
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/WebhookSubscription Shopify Admin GraphQL: WebhookSubscription
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/webhookSubscriptionCreate Shopify Admin GraphQL: webhookSubscriptionCreate
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/enums/WebhookSubscriptionTopic Shopify Admin GraphQL: WebhookSubscriptionTopic
  */
 final class Webhooks extends AbstractResource
 {

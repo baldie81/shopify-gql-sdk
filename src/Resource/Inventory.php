@@ -11,6 +11,10 @@ namespace Baldie81\ShopifyGraphQL\Resource;
  * {@see locations()}. The item must be *tracked* (set via
  * {@see Variants::update()} → `tracked`) and stocked at the location
  * ({@see activate()}) before a quantity sticks.
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/inventorySetQuantities Shopify Admin GraphQL: inventorySetQuantities
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/inventoryAdjustQuantities Shopify Admin GraphQL: inventoryAdjustQuantities
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/inventoryActivate Shopify Admin GraphQL: inventoryActivate
  */
 final class Inventory extends AbstractResource
 {

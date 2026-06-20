@@ -16,6 +16,10 @@ use Baldie81\ShopifyGraphQL\Support\GiftCardInput;
  *   - gift cards can't be deleted — only **deactivated** (irreversible).
  *
  * Balance is changed via {@see credit()} / {@see debit()}, never via {@see update()}.
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/GiftCard Shopify Admin GraphQL: GiftCard
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/giftCardCreate Shopify Admin GraphQL: giftCardCreate
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/giftCardCredit Shopify Admin GraphQL: giftCardCredit
  */
 final class GiftCards extends AbstractResource
 {

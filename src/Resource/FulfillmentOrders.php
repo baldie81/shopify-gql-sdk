@@ -14,6 +14,10 @@ use Baldie81\ShopifyGraphQL\Support\Gid;
  * lifecycle: holds, moves, close/cancel/open/reschedule, merge/split, and the
  * third-party fulfillment-service request flow (submit/accept/reject for both
  * fulfillment and cancellation).
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/FulfillmentOrder Shopify Admin GraphQL: FulfillmentOrder
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/fulfillmentOrderHold Shopify Admin GraphQL: fulfillmentOrderHold
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/fulfillmentOrderMove Shopify Admin GraphQL: fulfillmentOrderMove
  */
 final class FulfillmentOrders extends AbstractResource
 {

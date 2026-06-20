@@ -11,6 +11,10 @@ use Baldie81\ShopifyGraphQL\Support\PriceListInput;
  * Price lists — contextual / market / B2B pricing. Create/update/delete a price
  * list (relative `parent` adjustment vs. a catalog), then override individual
  * variants with fixed prices.
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/PriceList Shopify Admin GraphQL: PriceList
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/priceListCreate Shopify Admin GraphQL: priceListCreate
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/priceListFixedPricesAdd Shopify Admin GraphQL: priceListFixedPricesAdd
  */
 final class PriceLists extends AbstractResource
 {

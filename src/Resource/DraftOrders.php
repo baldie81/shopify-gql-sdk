@@ -13,6 +13,10 @@ use Baldie81\ShopifyGraphQL\Support\Gid;
  *
  * Reads accept an optional `$fields` selection override (caller-supplied
  * selection set); pass null for the lean default.
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/DraftOrder Shopify Admin GraphQL: DraftOrder
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/draftOrderCreate Shopify Admin GraphQL: draftOrderCreate
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/draftOrderComplete Shopify Admin GraphQL: draftOrderComplete
  */
 final class DraftOrders extends AbstractResource
 {

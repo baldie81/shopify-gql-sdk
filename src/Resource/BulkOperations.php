@@ -20,6 +20,10 @@ use Baldie81\ShopifyGraphQL\GraphQL\Client;
  * and read its `url` to download the JSONL. A bulk *mutation* additionally needs
  * its variables uploaded as JSONL first (via staged uploads); pass the resulting
  * `stagedUploadPath` to {@see runMutation()}.
+ *
+ * @link https://shopify.dev/docs/api/usage/bulk-operations/queries Shopify Admin GraphQL: bulk operations
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/bulkOperationRunQuery Shopify Admin GraphQL: bulkOperationRunQuery
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/bulkOperationRunMutation Shopify Admin GraphQL: bulkOperationRunMutation
  */
 final class BulkOperations extends AbstractResource
 {

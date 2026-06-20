@@ -11,6 +11,10 @@ use Baldie81\ShopifyGraphQL\Support\Gid;
  * (Shopify creates them via checkout or draft orders); this is the management
  * surface. `setMetafields()` is handy for writing integration state back onto an
  * order — e.g. an ERP id, a sync status flag, and a success/failure message.
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/Order Shopify Admin GraphQL: Order
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/fulfillmentCreate Shopify Admin GraphQL: fulfillmentCreate
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/refundCreate Shopify Admin GraphQL: refundCreate
  */
 final class Orders extends AbstractResource
 {

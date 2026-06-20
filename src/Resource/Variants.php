@@ -14,6 +14,9 @@ use Baldie81\ShopifyGraphQL\Support\VariantInput;
  *
  * The bulk mutations cap at {@see MAX_VARIANTS} variants per call; create/update/
  * delete split larger inputs into chunks automatically and merge the results.
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/ProductVariant Shopify Admin GraphQL: ProductVariant
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/productVariantsBulkUpdate Shopify Admin GraphQL: productVariantsBulkUpdate
  */
 final class Variants extends AbstractResource
 {

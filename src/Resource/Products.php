@@ -19,6 +19,10 @@ use Baldie81\ShopifyGraphQL\Support\ProductInput;
  * `{ product, userErrors }` payload unchanged so callers can inspect
  * `userErrors` (Shopify's business-validation results, returned as data rather
  * than thrown).
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/Product Shopify Admin GraphQL: Product
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/productSet Shopify Admin GraphQL: productSet
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate Shopify Admin GraphQL: productCreate
  */
 final class Products extends AbstractResource
 {

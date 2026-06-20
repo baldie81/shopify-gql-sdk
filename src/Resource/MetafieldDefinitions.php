@@ -12,6 +12,9 @@ use Baldie81\ShopifyGraphQL\Enum\MetafieldType;
  * Setting a metafield *value* ({@see Products::setMetafields()}) does not create
  * a *definition* — the structured, admin-visible declaration of a metafield.
  * Definitions are store-wide per (ownerType, namespace, key); create them once.
+ *
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/mutations/metafieldDefinitionCreate Shopify Admin GraphQL: metafieldDefinitionCreate
+ * @link https://shopify.dev/docs/api/admin-graphql/latest/objects/MetafieldDefinition Shopify Admin GraphQL: MetafieldDefinition
  */
 final class MetafieldDefinitions extends AbstractResource
 {
