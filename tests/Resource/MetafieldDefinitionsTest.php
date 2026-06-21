@@ -97,4 +97,39 @@ final class MetafieldDefinitionsTest extends MockClientTestCase
         self::assertSame('gid://shopify/MetafieldDefinition/1', $result['deletedDefinitionId']);
         self::assertTrue($this->body()['variables']['deleteAll']);
     }
+
+    public function testDefinePassesPinFlagToInput(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['metafieldDefinitionCreate' => ['createdDefinition' => ['id' => 'gid://1'], 'userErrors' => []]],
+        ]))]);
+
+        $client->metafieldDefinitions()->defineProduct('specs', 'material', MetafieldType::SingleLineText, 'Material', ['pin' => true]);
+
+        self::assertTrue($this->body()['variables']['definition']['pin']);
+    }
+
+    public function testUpdatePassesPinFlagToInput(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['metafieldDefinitionUpdate' => ['updatedDefinition' => ['id' => 'gid://1'], 'userErrors' => []]],
+        ]))]);
+
+        $client->metafieldDefinitions()->update([
+            'ownerType' => 'PRODUCT', 'namespace' => 'custom', 'key' => 'erp_id', 'name' => 'ERP id', 'pin' => false,
+        ]);
+
+        self::assertFalse($this->body()['variables']['definition']['pin']);
+    }
+
+    public function testAllSelectsPinnedPosition(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['metafieldDefinitions' => ['nodes' => []]],
+        ]))]);
+
+        $client->metafieldDefinitions()->all('PRODUCT');
+
+        self::assertStringContainsString('pinnedPosition', $this->body()['query']);
+    }
 }

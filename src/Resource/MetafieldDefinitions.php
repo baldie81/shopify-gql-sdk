@@ -94,7 +94,7 @@ final class MetafieldDefinitions extends AbstractResource
     {
         $query = 'query ($ownerType: MetafieldOwnerType!, $first: Int!) {'
             . ' metafieldDefinitions(ownerType: $ownerType, first: $first) {'
-            . ' nodes { id name namespace key description ownerType type { name } } } }';
+            . ' nodes { id name namespace key description ownerType pinnedPosition type { name } } } }';
 
         $first = max(1, min($first, 250));
 
