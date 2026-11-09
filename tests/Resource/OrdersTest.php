@@ -103,7 +103,7 @@ final class OrdersTest extends MockClientTestCase
     {
         $client = $this->mockClient([new Response(200, [], (string) json_encode([
             'data' => ['refundCreate' => ['refund' => ['id' => 'gid://shopify/Refund/3'], 'order' => null, 'userErrors' => []]],
-        ]))]); // default 2025-07
+        ]))], '2025-07'); // pre-idempotency version
 
         $client->orders()->refund('7', ['note' => 'x']);
 

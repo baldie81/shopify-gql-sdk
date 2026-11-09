@@ -24,7 +24,7 @@ abstract class MockClientTestCase extends TestCase
     /**
      * @param list<mixed> $responses queued Response/Exception objects
      */
-    protected function mockClient(array $responses, string $apiVersion = '2025-07'): ShopifyClient
+    protected function mockClient(array $responses, string $apiVersion = '2026-10'): ShopifyClient
     {
         $this->history = [];
 

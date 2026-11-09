@@ -33,7 +33,7 @@ final class Client
         private readonly string $path = 'graphql.json',
         private readonly int $maxRetries = 2,
         ?callable $sleeper = null,
-        private readonly string $apiVersion = '2025-07',
+        private readonly string $apiVersion = '2026-10',
     ) {
         $this->sleeper = $sleeper ?? static fn (int $microseconds) => usleep($microseconds);
     }

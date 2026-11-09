@@ -10,7 +10,7 @@ namespace Baldie81\ShopifyGraphQL;
  *   new Configuration(
  *       shop:        'my-store',          // or 'my-store.myshopify.com'
  *       accessToken: 'shpat_...',         // Admin API access token
- *       apiVersion:  '2025-07',           // dated, quarterly; ~12-month support window
+ *       apiVersion:  '2026-10',           // dated, quarterly; ~12-month support window
  *   );
  */
 final class Configuration
@@ -18,7 +18,7 @@ final class Configuration
     public function __construct(
         public readonly string $shop,
         public readonly string $accessToken,
-        public readonly string $apiVersion = '2025-07',
+        public readonly string $apiVersion = '2026-10',
         public readonly float $timeout = 30.0,
         public readonly float $connectTimeout = 10.0,
         public readonly bool $verifySsl = true,
@@ -35,7 +35,7 @@ final class Configuration
 
     /**
      * The full GraphQL endpoint, e.g.
-     * `https://my-store.myshopify.com/admin/api/2025-07/graphql.json`.
+     * `https://my-store.myshopify.com/admin/api/2026-10/graphql.json`.
      */
     public function endpoint(): string
     {

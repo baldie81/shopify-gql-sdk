@@ -14,7 +14,7 @@ final class WebhooksTest extends MockClientTestCase
     {
         $client = $this->mockClient([new Response(200, [], (string) json_encode([
             'data' => ['webhookSubscriptionCreate' => ['webhookSubscription' => ['id' => 'gid://shopify/WebhookSubscription/1', 'topic' => 'ORDERS_CREATE'], 'userErrors' => []]],
-        ]))]); // default 2025-07
+        ]))], '2025-07'); // pre-2025-10 version
 
         $result = $client->webhooks()->create(WebhookTopic::OrdersCreate, 'https://example.com/hooks/orders', ['includeFields' => ['id', 'name']]);
 

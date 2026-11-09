@@ -22,7 +22,7 @@ final class ProductsTest extends MockClientTestCase
 
         $request = $this->lastRequest();
         self::assertSame('POST', $request->getMethod());
-        self::assertStringEndsWith('/admin/api/2025-07/graphql.json', (string) $request->getUri());
+        self::assertStringEndsWith('/admin/api/2026-10/graphql.json', (string) $request->getUri());
 
         $body = $this->body();
         self::assertStringContainsString('product(id: $id)', $body['query']);

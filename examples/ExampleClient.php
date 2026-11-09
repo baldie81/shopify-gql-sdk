@@ -21,7 +21,7 @@ final class ExampleClient
         return ShopifyClient::create(new Configuration(
             shop:        'your-store.myshopify.com',     // your *.myshopify.com domain
             accessToken: 'shpat_xxxxxxxxxxxxxxxxxxxxxxxx', // Admin API access token
-            apiVersion:  '2025-07',
+            apiVersion:  '2026-10',
         ));
     }
 }

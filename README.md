@@ -66,7 +66,7 @@ use Baldie81\ShopifyGraphQL\ShopifyClient;
 $shopify = ShopifyClient::create(new Configuration(
     shop:        'my-store',          // or 'my-store.myshopify.com'
     accessToken: 'shpat_...',         // Admin API access token
-    apiVersion:  '2025-07',           // dated, quarterly; ~12-month support window
+    apiVersion:  '2026-10',           // dated, quarterly; ~12-month support window
 ));
 
 $product = $shopify->products()->get('123');   // numeric id or a GID
@@ -542,7 +542,10 @@ Notes:
   computes a backoff from `extensions.cost`, and retries (default 2 attempts).
 - **GIDs.** Everything is identified by `gid://shopify/<Type>/<id>`; helpers coerce
   numeric ids and extract them back.
-- **Versioning.** The dated `apiVersion` is part of the endpoint and is required.
+- **Versioning.** The dated `apiVersion` is part of the endpoint and defaults to
+  `2026-10`. Pin it explicitly in production; older versions still work — the
+  SDK adapts version-specific inputs (webhook `uri`/`callbackUrl`, 2026-04
+  idempotency and `changeFromQuantity`) to whatever you configure.
 
 ## Examples
 

@@ -22,7 +22,7 @@ final class InventoryTest extends MockClientTestCase
     {
         $client = $this->mockClient([new Response(200, [], (string) json_encode([
             'data' => ['inventorySetQuantities' => ['inventoryAdjustmentGroup' => ['reason' => 'correction'], 'userErrors' => []]],
-        ]))]);
+        ]))], '2025-07'); // pre-2026-04 behaviour
 
         $client->inventory()->setQuantities([
             ['inventoryItemId' => 'gid://shopify/InventoryItem/1', 'locationId' => 'gid://shopify/Location/1', 'quantity' => 100],
@@ -53,7 +53,7 @@ final class InventoryTest extends MockClientTestCase
     public function testSetQuantitiesChunksAtTheLimit(): void
     {
         $ok = (string) json_encode(['data' => ['inventorySetQuantities' => ['inventoryAdjustmentGroup' => ['reason' => 'correction'], 'userErrors' => []]]]);
-        $client = $this->mockClient([new Response(200, [], $ok), new Response(200, [], $ok)]);
+        $client = $this->mockClient([new Response(200, [], $ok), new Response(200, [], $ok)], '2025-07'); // pre-2026-04 behaviour
 
         $quantities = [];
         for ($i = 0; $i < 300; $i++) {
