@@ -23,7 +23,8 @@ final class GiftCardsTest extends MockClientTestCase
         $result = $client->giftCards()->create(GiftCardInput::make('50')->note('Loyalty'));
 
         self::assertSame('ABCD1234WXYZ', $result['giftCardCode']); // plaintext, only here
-        self::assertSame('50.00', $this->body()['variables']['input']['initialValue']);
+        self::assertSame(['amount' => '50.00', 'currencyCode' => 'EUR'], $this->body()['variables']['input']['initialAmount']);
+        self::assertArrayNotHasKey('initialValue', $this->body()['variables']['input']);
         self::assertSame('Loyalty', $this->body()['variables']['input']['note']);
     }
 

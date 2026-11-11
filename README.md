@@ -472,8 +472,15 @@ to keep the built-in selection.
 ```php
 use Baldie81\ShopifyGraphQL\Support\GiftCardInput;
 
-$result = $shopify->giftCards()->create(GiftCardInput::make('25.00')->note('Loyalty reward'));
+$result = $shopify->giftCards()->create(GiftCardInput::make('25.00')->note('Loyalty reward')); // EUR by default
 $code   = $result['giftCardCode'];   // ⚠ the plaintext code is returned ONLY here — capture it
+
+// Other currency, sent to a recipient with a personal message on a schedule
+$shopify->giftCards()->create(
+    GiftCardInput::make('50.00', 'USD')
+        ->customer($buyerId)
+        ->recipient($friendId, message: 'Happy birthday!', preferredName: 'Alex', sendAt: '2026-12-01T09:00:00Z')
+);
 
 $shopify->giftCards()->credit($id, '10.00', 'EUR');   // add funds
 $shopify->giftCards()->debit($id, '5.00', 'EUR');     // remove funds

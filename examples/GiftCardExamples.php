@@ -61,7 +61,7 @@ final class GiftCardExamples
      */
     public function issue(array $data = self::SAMPLE): array
     {
-        $input = GiftCardInput::make($data['initialValue'])
+        $input = GiftCardInput::make($data['initialValue'], $data['currency'])
             ->note($data['note'])
             ->expiresOn($data['expiresOn']);
 
