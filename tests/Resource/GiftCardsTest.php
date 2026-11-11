@@ -51,6 +51,30 @@ final class GiftCardsTest extends MockClientTestCase
         self::assertSame(['amount' => '5.00', 'currencyCode' => 'EUR'], $this->body()['variables']['debitInput']['debitAmount']);
     }
 
+    public function testUpdateSendsInputAndSelectsOnlyValidUserErrorFields(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['giftCardUpdate' => [
+                'giftCard'   => ['id' => 'gid://shopify/GiftCard/1', 'note' => 'VIP', 'expiresOn' => '2027-12-31'],
+                'userErrors' => [],
+            ]],
+        ]))]);
+
+        $result = $client->giftCards()->update('1', ['note' => 'VIP', 'expiresOn' => '2027-12-31']);
+
+        self::assertSame('VIP', $result['giftCard']['note']);
+        self::assertSame([], $result['userErrors']);
+
+        $body = $this->body();
+        self::assertStringContainsString('giftCardUpdate(id: $id, input: $input)', $body['query']);
+        // giftCardUpdate returns a plain UserError, which has no `code` field —
+        // selecting it makes Shopify reject the whole operation.
+        self::assertStringContainsString('userErrors { field message }', $body['query']);
+        self::assertStringNotContainsString('userErrors { field message code }', $body['query']);
+        self::assertSame('gid://shopify/GiftCard/1', $body['variables']['id']);
+        self::assertSame(['note' => 'VIP', 'expiresOn' => '2027-12-31'], $body['variables']['input']);
+    }
+
     public function testDeactivateUsesDeactivateMutation(): void
     {
         $client = $this->mockClient([new Response(200, [], (string) json_encode([

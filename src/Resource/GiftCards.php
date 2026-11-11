@@ -79,7 +79,7 @@ final class GiftCards extends AbstractResource
     public function update(string $id, array $input): array
     {
         $mutation = 'mutation ($id: ID!, $input: GiftCardUpdateInput!) {'
-            . ' giftCardUpdate(id: $id, input: $input) { giftCard { ' . self::FIELDS . ' } userErrors { field message code } } }';
+            . ' giftCardUpdate(id: $id, input: $input) { giftCard { ' . self::FIELDS . ' } userErrors { field message } } }'; // plain UserError: no `code`
 
         return $this->gql->execute($mutation, ['id' => Gid::giftCard($id), 'input' => $input])['giftCardUpdate'] ?? ['giftCard' => null, 'userErrors' => []];
     }
