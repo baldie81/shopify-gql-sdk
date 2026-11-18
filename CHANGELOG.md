@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-11-18
+
+### Documentation
+
+- README and the `Media` class now spell out that a descriptive `alt:` passed to
+  `Media` needs a `key:` alongside it; otherwise the alt text is the key, and
+  rewording it later makes `ensureMedia()` add the image again.
+- README notes that an `alt:` you pass is reapplied on every sync, and what
+  `prune: true` does for a duplicated or migrated product with custom alt text.
+
+### Internal
+
+- CI uses `actions/checkout@v5`.
+
 ## [1.4.0] - 2026-11-18
 
 Media is now recognised by id, through a stored key map, instead of by alt text.
@@ -192,6 +206,7 @@ silently** — read "Behaviour changes" before upgrading.
   collections, fulfillment orders, price lists, draft orders, gift cards,
   webhooks, metafields and definitions, translations, files and bulk operations.
 
+[1.4.1]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.1.0...v1.2.0
