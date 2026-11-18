@@ -86,16 +86,9 @@ final class InventoryTest extends MockClientTestCase
         self::assertSame(90, $body['variables']['input']['quantities'][0]['changeFromQuantity']);
     }
 
-    public function testSetQuantitiesAutoResolvesChangeFromQuantityOn2026_04(): void
+    public function testSetQuantitiesSkipsCompareWithExplicitNullOn2026_04(): void
     {
         $client = $this->mockClient([
-            // 1. pre-read of current quantities
-            new Response(200, [], (string) json_encode(['data' => ['nodes' => [
-                ['id' => 'gid://shopify/InventoryItem/1', 'inventoryLevels' => ['nodes' => [
-                    ['location' => ['id' => 'gid://shopify/Location/1'], 'quantities' => [['name' => 'available', 'quantity' => 5]]],
-                ]]],
-            ]]])),
-            // 2. the set
             new Response(200, [], (string) json_encode(['data' => ['inventorySetQuantities' => ['inventoryAdjustmentGroup' => ['reason' => 'correction'], 'userErrors' => []]]])),
         ], '2026-04');
 
@@ -103,9 +96,12 @@ final class InventoryTest extends MockClientTestCase
             ['inventoryItemId' => 'gid://shopify/InventoryItem/1', 'locationId' => 'gid://shopify/Location/1', 'quantity' => 100],
         ]);
 
-        self::assertCount(2, $this->history); // pre-read + set
-        self::assertStringContainsString('inventoryLevels', $this->body(0)['query']);
-        self::assertSame(5, $this->body(1)['variables']['input']['quantities'][0]['changeFromQuantity']);
+        // No pre-read: an explicit null opts out of the compare-and-swap check,
+        // so there's no read-then-write race and no extra query.
+        self::assertCount(1, $this->history);
+        $entry = $this->body(0)['variables']['input']['quantities'][0];
+        self::assertArrayHasKey('changeFromQuantity', $entry);
+        self::assertNull($entry['changeFromQuantity']);
     }
 
     public function testSetQuantitiesChunksUseDistinctIdempotencyKeysOn2026_04(): void

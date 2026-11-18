@@ -35,6 +35,8 @@ use Baldie81\ShopifyGraphQL\Resource\Webhooks;
  */
 final class ShopifyClient
 {
+    public const string DEFAULT_API_VERSION = '2026-10';
+
     private ?Products $products = null;
     private ?BulkOperations $bulkOperations = null;
     private ?Translations $translations = null;
@@ -51,12 +53,21 @@ final class ShopifyClient
     private ?GiftCards $giftCards = null;
     private ?Webhooks $webhooks = null;
 
+    /**
+     * @param ClientInterface|null $uploader   plain client (no Shopify auth) for pushing
+     *                                         bytes to staged-upload targets
+     * @param ClientInterface|null $downloader plain client for downloading bulk results
+     */
     public function __construct(
         private readonly GraphQLClient $gql,
+        private readonly ?ClientInterface $uploader = null,
+        private readonly ?ClientInterface $downloader = null,
     ) {}
 
     /**
-     * Build a client from connection settings (the common case).
+     * Build a client from connection settings (the common case). The TLS and
+     * connect-timeout settings also apply to the side channels (staged uploads,
+     * bulk-result downloads), which talk to storage hosts rather than Shopify.
      */
     public static function create(Configuration $config): self
     {
@@ -72,17 +83,55 @@ final class ShopifyClient
             ],
         ]);
 
-        return new self(new GraphQLClient($guzzle, apiVersion: $config->apiVersion));
+        $sideChannel = ['connect_timeout' => $config->connectTimeout, 'verify' => $config->verifySsl];
+
+        return new self(
+            new GraphQLClient($guzzle, maxRetries: $config->maxRetries, apiVersion: $config->apiVersion),
+            new GuzzleClient($sideChannel + ['timeout' => max($config->timeout, Files::UPLOAD_TIMEOUT)]),
+            new GuzzleClient($sideChannel + ['timeout' => 0, 'read_timeout' => max($config->timeout, 60.0)]),
+        );
     }
 
     /**
      * Build a client around a pre-configured Guzzle client (custom
      * middleware/handlers). Its `base_uri` must point at the versioned Admin API
      * root (`.../admin/api/<version>/`) and carry the access-token header.
+     *
+     * The API version (which gates version-specific behaviour) is read from that
+     * `base_uri`; pass `$apiVersion` only when it can't be — a value that
+     * contradicts the `base_uri` is rejected.
+     *
+     * @throws \InvalidArgumentException when `$apiVersion` and the `base_uri` disagree
      */
-    public static function fromGuzzle(ClientInterface $client, string $apiVersion = '2026-10'): self
+    public static function fromGuzzle(
+        ClientInterface $client,
+        ?string $apiVersion = null,
+        int $maxRetries = 2,
+        ?ClientInterface $uploader = null,
+        ?ClientInterface $downloader = null,
+    ): self {
+        $fromUri = self::versionFromBaseUri($client);
+
+        if ($apiVersion !== null && $fromUri !== null && $apiVersion !== $fromUri) {
+            throw new \InvalidArgumentException(
+                "API version mismatch: \"{$apiVersion}\" was passed but the client's base_uri targets \"{$fromUri}\".",
+            );
+        }
+
+        $version = $apiVersion ?? $fromUri ?? self::DEFAULT_API_VERSION;
+
+        return new self(new GraphQLClient($client, maxRetries: $maxRetries, apiVersion: $version), $uploader, $downloader);
+    }
+
+    private static function versionFromBaseUri(ClientInterface $client): ?string
     {
-        return new self(new GraphQLClient($client, apiVersion: $apiVersion));
+        if (!$client instanceof GuzzleClient) {
+            return null;
+        }
+
+        $baseUri = (string) ($client->getConfig('base_uri') ?? '');
+
+        return preg_match('#/admin/api/([^/]+)/?#', $baseUri, $m) === 1 ? $m[1] : null;
     }
 
     public function graphql(): GraphQLClient
@@ -92,12 +141,12 @@ final class ShopifyClient
 
     public function products(): Products
     {
-        return $this->products ??= new Products($this->gql);
+        return $this->products ??= new Products($this->gql, $this->files(), $this->translations());
     }
 
     public function bulkOperations(): BulkOperations
     {
-        return $this->bulkOperations ??= new BulkOperations($this->gql);
+        return $this->bulkOperations ??= new BulkOperations($this->gql, null, $this->files(), $this->downloader);
     }
 
     public function translations(): Translations
@@ -107,7 +156,7 @@ final class ShopifyClient
 
     public function files(): Files
     {
-        return $this->files ??= new Files($this->gql);
+        return $this->files ??= new Files($this->gql, $this->uploader);
     }
 
     public function metafieldDefinitions(): MetafieldDefinitions

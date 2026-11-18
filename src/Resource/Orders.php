@@ -62,8 +62,9 @@ final class Orders extends AbstractResource
      */
     public function fulfill(string $id, ?array $tracking = null, bool $notifyCustomer = false): array
     {
-        $foQuery = 'query ($id: ID!) { order(id: $id) { fulfillmentOrders(first: 50) { nodes { id status } } } }';
-        $nodes   = $this->gql->execute($foQuery, ['id' => Gid::order($id)])['order']['fulfillmentOrders']['nodes'] ?? [];
+        $foQuery = 'query ($id: ID!, $first: Int!, $after: String) { order(id: $id) {'
+            . ' fulfillmentOrders(first: $first, after: $after) { nodes { id status } pageInfo { hasNextPage endCursor } } } }';
+        $nodes   = $this->paginateNodes($foQuery, ['id' => Gid::order($id)], ['order', 'fulfillmentOrders']);
 
         $lineItemsByFulfillmentOrder = [];
         foreach ($nodes as $fo) {

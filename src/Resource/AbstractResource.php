@@ -109,30 +109,42 @@ abstract class AbstractResource
     }
 
     /**
-     * Walk a top-level Relay connection by cursor and return the merged `nodes`.
+     * Walk a Relay connection by cursor and return the merged `nodes`.
      *
      * The query must accept `$first: Int!` and `$after: String` and select
-     * `nodes { … } pageInfo { hasNextPage endCursor }` on `$connectionKey`.
+     * `nodes { … } pageInfo { hasNextPage endCursor }` on the connection.
+     * `$connection` locates it in the response: a top-level key (`'products'`)
+     * or a path for a nested connection (`['product', 'variants']`).
      * Caller-supplied `$variables` (e.g. a search `query`) are merged in; the
      * cursor variables always win.
      *
-     * @param array<string,mixed> $variables
+     * `$limit` caps the number of nodes returned (null = every page).
+     *
+     * @param array<string,mixed>  $variables
+     * @param string|list<string>  $connection
      * @return list<array<string,mixed>>
      */
     protected function paginateNodes(
         string $query,
         array $variables,
-        string $connectionKey,
+        string|array $connection,
         int $pageSize = self::MAX_PAGE_SIZE,
+        ?int $limit = null,
     ): array {
         $pageSize = max(1, min($pageSize, self::MAX_PAGE_SIZE));
+        if ($limit !== null) {
+            $limit = max(1, $limit);
+        }
 
         $nodes = [];
         $after = null;
 
         do {
-            $data = $this->gql->execute($query, ['first' => $pageSize, 'after' => $after] + $variables);
-            $conn = $data[$connectionKey] ?? [];
+            $first = $limit === null ? $pageSize : min($pageSize, $limit - count($nodes));
+            $conn  = $this->gql->execute($query, ['first' => $first, 'after' => $after] + $variables);
+            foreach ((array) $connection as $key) {
+                $conn = is_array($conn) ? ($conn[$key] ?? []) : [];
+            }
 
             foreach ($conn['nodes'] ?? [] as $node) {
                 $nodes[] = $node;
@@ -141,7 +153,7 @@ abstract class AbstractResource
             $pageInfo = $conn['pageInfo'] ?? [];
             $hasNext  = (bool) ($pageInfo['hasNextPage'] ?? false);
             $after    = $pageInfo['endCursor'] ?? null;
-        } while ($hasNext && $after !== null);
+        } while ($hasNext && $after !== null && ($limit === null || count($nodes) < $limit));
 
         return $nodes;
     }

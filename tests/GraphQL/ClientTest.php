@@ -109,12 +109,92 @@ final class ClientTest extends TestCase
         }
     }
 
-    public function testHttp429ThrowsThrottledException(): void
+    public function testHttp429ThrowsThrottledExceptionOnceRetriesAreSpent(): void
     {
-        $client = $this->client([new Response(429, [], 'Too Many Requests')]);
+        $client = $this->client([new Response(429, [], 'Too Many Requests')], maxRetries: 0);
 
         $this->expectException(ThrottledException::class);
         $client->execute('query{...}');
+    }
+
+    public function testHttp429IsRetriedHonouringRetryAfter(): void
+    {
+        $client = $this->client([
+            new Response(429, ['Retry-After' => '2'], ''),
+            new Response(200, [], (string) json_encode(['data' => ['ok' => true]])),
+        ]);
+
+        self::assertSame(['ok' => true], $client->execute('mutation { x }')); // a 429 was never applied: safe for mutations too
+        self::assertSame([2_000_000], $this->slept);
+    }
+
+    public function testGatewayErrorIsRetriedForQueries(): void
+    {
+        $client = $this->client([
+            new Response(503, [], ''),
+            new Response(200, [], (string) json_encode(['data' => ['ok' => true]])),
+        ]);
+
+        self::assertSame(['ok' => true], $client->execute('query { x }'));
+        self::assertSame([1_000_000], $this->slept);
+    }
+
+    public function testGatewayErrorIsNotRetriedForMutations(): void
+    {
+        // The write may already have been applied, so a blind retry could duplicate it.
+        $client = $this->client([new Response(503, [], '')]);
+
+        try {
+            $client->execute('mutation { productCreate { product { id } } }');
+            self::fail('expected GraphQLException');
+        } catch (GraphQLException $e) {
+            self::assertSame(503, $e->statusCode);
+            self::assertSame([], $this->slept);
+        }
+    }
+
+    public function testStringErrorsOnA200AreThrownNotSwallowed(): void
+    {
+        $client = $this->client([new Response(200, [], '{"errors":"Not Found"}')]);
+
+        try {
+            $client->execute('query{...}');
+            self::fail('expected GraphQLException');
+        } catch (GraphQLException $e) {
+            self::assertSame('Not Found', $e->getMessage());
+            self::assertSame([['message' => 'Not Found']], $e->errors);
+        }
+    }
+
+    public function testAuthFailureThrowsEvenWhenTheClientDisablesHttpErrors(): void
+    {
+        $guzzle = new GuzzleClient([
+            'handler'     => HandlerStack::create(new MockHandler([
+                new Response(401, [], '{"errors":"[API] Invalid API key or access token"}'),
+            ])),
+            'base_uri'    => 'https://t.myshopify.com/admin/api/2026-10/',
+            'http_errors' => false,
+        ]);
+
+        try {
+            (new Client($guzzle))->execute('query{...}');
+            self::fail('expected GraphQLException');
+        } catch (GraphQLException $e) {
+            self::assertSame(401, $e->statusCode);
+            self::assertStringContainsString('Invalid API key', $e->getMessage());
+        }
+    }
+
+    public function testThrottledExceptionKeepsTheErrors(): void
+    {
+        $client = $this->client([self::throttled()], maxRetries: 0);
+
+        try {
+            $client->execute('query{...}');
+            self::fail('expected ThrottledException');
+        } catch (ThrottledException $e) {
+            self::assertSame('THROTTLED', $e->errors[0]['extensions']['code']);
+        }
     }
 
     public function testHttp500ThrowsGraphQLExceptionWithStatus(): void

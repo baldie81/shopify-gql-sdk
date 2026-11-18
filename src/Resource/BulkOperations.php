@@ -8,6 +8,7 @@ use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\ClientInterface;
 use Baldie81\ShopifyGraphQL\Enum\BulkOperationStatus;
 use Baldie81\ShopifyGraphQL\Enum\BulkOperationType;
+use Baldie81\ShopifyGraphQL\Exception\PollTimeoutException;
 use Baldie81\ShopifyGraphQL\Exception\TransportException;
 use Baldie81\ShopifyGraphQL\GraphQL\Client;
 
@@ -42,7 +43,7 @@ final class BulkOperations extends AbstractResource
         $this->sleeper    = $sleeper ?? static fn (int $microseconds) => usleep($microseconds);
         $this->files      = $files ?? new Files($gql);
         // Plain client for downloading the result file from external storage.
-        $this->downloader = $downloader ?? new GuzzleClient(['timeout' => 0]);
+        $this->downloader = $downloader ?? new GuzzleClient(['timeout' => 0, 'connect_timeout' => 10.0, 'read_timeout' => 60.0]);
     }
 
     /**
@@ -77,14 +78,27 @@ final class BulkOperations extends AbstractResource
                 $line   = trim(substr($buffer, 0, $newline));
                 $buffer = substr($buffer, $newline + 1);
                 if ($line !== '') {
-                    yield json_decode($line, true);
+                    yield self::decodeLine($line);
                 }
             }
         }
         $buffer = trim($buffer);
         if ($buffer !== '') {
-            yield json_decode($buffer, true);
+            yield self::decodeLine($buffer);
         }
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private static function decodeLine(string $line): array
+    {
+        $row = json_decode($line, true);
+        if (!is_array($row)) {
+            throw new TransportException('Malformed JSONL line in bulk result: ' . substr($line, 0, 200));
+        }
+
+        return $row;
     }
 
     /**
@@ -153,7 +167,7 @@ final class BulkOperations extends AbstractResource
     {
         $lines = [];
         foreach ($rows as $row) {
-            $lines[] = (string) json_encode($row);
+            $lines[] = json_encode($row, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         }
 
         return implode("\n", $lines);
@@ -176,14 +190,38 @@ final class BulkOperations extends AbstractResource
      * The most recent bulk operation of the given type. Accepts a
      * {@see BulkOperationType} (or the raw "QUERY"/"MUTATION" string).
      *
+     * Uses the `bulkOperations` connection (newest first) on 2026-01+, where
+     * `currentBulkOperation` is deprecated; older versions still use the latter.
+     *
      * @return array<string,mixed>|null
      */
     public function current(BulkOperationType|string $type = BulkOperationType::Query): ?array
     {
-        $type  = $type instanceof BulkOperationType ? $type->value : $type;
-        $query = 'query ($type: BulkOperationType) { currentBulkOperation(type: $type) { ' . self::FIELDS . ' } }';
+        $type = $type instanceof BulkOperationType ? $type->value : $type;
 
-        return $this->gql->execute($query, ['type' => $type])['currentBulkOperation'] ?? null;
+        if (!$this->gql->apiVersionAtLeast('2026-01')) {
+            $query = 'query ($type: BulkOperationType) { currentBulkOperation(type: $type) { ' . self::FIELDS . ' } }';
+
+            return $this->gql->execute($query, ['type' => $type])['currentBulkOperation'] ?? null;
+        }
+
+        return $this->list('operation_type:' . strtolower($type), 1)[0] ?? null;
+    }
+
+    /**
+     * Recent bulk operations, newest first (2026-01+). `$query` is Shopify search
+     * syntax over `operation_type` (`query`/`mutation`), `status`
+     * (`running`, `completed`, …) and `created_at`, e.g. `status:running`.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function list(string $query = '', int $first = 25): array
+    {
+        $gql = 'query ($first: Int!, $after: String, $query: String) {'
+            . ' bulkOperations(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {'
+            . ' nodes { ' . self::FIELDS . ' } pageInfo { hasNextPage endCursor } } }';
+
+        return $this->paginateNodes($gql, ['query' => $query], 'bulkOperations', limit: $first);
     }
 
     /**
@@ -207,9 +245,15 @@ final class BulkOperations extends AbstractResource
      * (see {@see BulkOperationStatus::isTerminal()}) or the attempt budget runs
      * out. Returns the final operation (its `url` holds the JSONL when COMPLETED).
      *
-     * @return array<string,mixed>
+     * A terminal status isn't necessarily success — check `status`. If the
+     * operation is still running when the budget is spent (default 300 × 2s =
+     * 10 minutes), a {@see PollTimeoutException} carrying the last-seen operation
+     * is thrown, so a timeout can't be mistaken for completion.
+     *
+     * @return array<string,mixed> the operation, or [] if no such operation exists
+     * @throws PollTimeoutException
      */
-    public function poll(string $id, int $maxAttempts = 60, float $intervalSeconds = 2.0): array
+    public function poll(string $id, int $maxAttempts = 300, float $intervalSeconds = 2.0): array
     {
         $op       = $this->get($id);
         $attempts = 0;
@@ -218,6 +262,13 @@ final class BulkOperations extends AbstractResource
             ($this->sleeper)((int) ($intervalSeconds * 1_000_000));
             $op = $this->get($id);
             $attempts++;
+        }
+
+        if ($op !== null && !self::isTerminal($op)) {
+            throw new PollTimeoutException(
+                sprintf('Bulk operation %s is still %s after %d polls.', $id, (string) ($op['status'] ?? 'unknown'), $attempts),
+                $op,
+            );
         }
 
         return $op ?? [];

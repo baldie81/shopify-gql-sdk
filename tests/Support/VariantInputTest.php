@@ -29,6 +29,36 @@ final class VariantInputTest extends TestCase
 
     public function testStringPricePassesThrough(): void
     {
-        self::assertSame('15.99', VariantInput::make('v')->price('15.99')->toArray()['price']);
+        self::assertSame('15.99', VariantInput::make('1')->price('15.99')->toArray()['price']);
+    }
+
+    public function testNumericIdIsCoercedToAVariantGid(): void
+    {
+        self::assertSame('gid://shopify/ProductVariant/42', VariantInput::make('42')->toArray()['id']);
+    }
+
+    public function testNewVariantHasNoIdAndCarriesOptionValues(): void
+    {
+        $input = VariantInput::new()->optionValue('Size', 'XL')->optionValue('Color', 'Red')->price('9.99')->toArray();
+
+        self::assertArrayNotHasKey('id', $input);
+        self::assertSame(
+            [['optionName' => 'Size', 'name' => 'XL'], ['optionName' => 'Color', 'name' => 'Red']],
+            $input['optionValues'],
+        );
+    }
+
+    public function testBarcodeIsAVariantFieldNotAnInventoryItemField(): void
+    {
+        $input = VariantInput::make('1')->barcode('1234567890123')->sku('S')->toArray();
+
+        self::assertSame('1234567890123', $input['barcode']);
+        self::assertSame(['sku' => 'S'], $input['inventoryItem']); // InventoryItemInput has no barcode
+    }
+
+    public function testInvalidPriceIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        VariantInput::make('1')->price('9,99');
     }
 }

@@ -7,16 +7,22 @@ namespace Baldie81\ShopifyGraphQL\Support;
 /**
  * Fluent builder for a `GiftCardCreateInput`.
  *
- *   GiftCardInput::make('50.00')->customer($customerId)->note('Loyalty reward')->expiresOn('2027-12-31');
+ *   GiftCardInput::make('50.00', 'EUR')->customer($customerId)->note('Loyalty reward')->expiresOn('2027-12-31');
  *   GiftCardInput::make('50.00', 'USD')->recipient($friendId, message: 'Happy birthday!');
  *
  * The amount is sent as `initialAmount` (a `MoneyInput`), which replaces the
- * deprecated `initialValue`. The currency defaults to {@see DEFAULT_CURRENCY}.
+ * deprecated `initialValue`. Always pass the currency explicitly: the
+ * {@see DEFAULT_CURRENCY} fallback is deprecated and the argument becomes
+ * required in 2.0. Pass the amount as a string to keep it exact (see {@see Money}).
  * Omit `code()` to let Shopify generate one — and remember the plaintext code is
  * only returned once, from `giftCardCreate` (as `giftCardCode`).
  */
 final class GiftCardInput implements Arrayable
 {
+    /**
+     * @deprecated 1.3.0 Pass the currency code explicitly; a library can't know
+     *             the shop's currency. The default is removed in 2.0.
+     */
     public const string DEFAULT_CURRENCY = 'EUR';
 
     /** @var array<string,mixed> */
@@ -134,6 +140,6 @@ final class GiftCardInput implements Arrayable
 
     private static function amount(string|float $value): string
     {
-        return number_format((float) $value, 2, '.', '');
+        return Money::decimal($value);
     }
 }

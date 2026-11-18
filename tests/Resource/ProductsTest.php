@@ -154,4 +154,19 @@ final class ProductsTest extends MockClientTestCase
         self::assertNull($result['product']);
         self::assertSame('Title can’t be blank', $result['userErrors'][0]['message']);
     }
+
+    public function testUpdateDoesNotRegisterTranslationsWhenTheUpdateFailed(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['productUpdate' => ['product' => null, 'userErrors' => [['field' => ['title'], 'message' => "Title can't be blank"]]]],
+        ]))]);
+
+        $result = $client->products()->update('55', \Baldie81\ShopifyGraphQL\Support\ProductInput::make()->field(
+            \Baldie81\ShopifyGraphQL\Support\ProductField::title('')->withTranslation('fr', 'Robe'),
+        ));
+
+        self::assertCount(1, $result['userErrors']);
+        self::assertArrayNotHasKey('translations', $result);
+        self::assertCount(1, $this->history); // no digest lookup, no translationsRegister
+    }
 }

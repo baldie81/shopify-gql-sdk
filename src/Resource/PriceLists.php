@@ -130,7 +130,7 @@ final class PriceLists extends AbstractResource
         return $this->gql->execute($mutation, [
             'priceListId'        => Gid::priceList($id),
             'pricesToAdd'        => array_map([self::class, 'coercePrice'], array_values($pricesToAdd)),
-            'variantIdsToDelete' => array_values(array_map(static fn (string $v): string => Gid::isGid($v) ? $v : Gid::of('ProductVariant', $v), $variantIdsToDelete)),
+            'variantIdsToDelete' => array_values(array_map(static fn (int|string $v): string => Gid::variant($v), $variantIdsToDelete)),
         ])['priceListFixedPricesUpdate'] ?? ['priceList' => null, 'pricesAdded' => [], 'deletedFixedPriceVariantIds' => [], 'userErrors' => []];
     }
 
@@ -148,7 +148,7 @@ final class PriceLists extends AbstractResource
 
         return $this->gql->execute($mutation, [
             'priceListId' => Gid::priceList($id),
-            'variantIds'  => array_values(array_map(static fn (string $v): string => Gid::isGid($v) ? $v : Gid::of('ProductVariant', $v), $variantIds)),
+            'variantIds'  => array_values(array_map(static fn (int|string $v): string => Gid::variant($v), $variantIds)),
         ])['priceListFixedPricesDelete'] ?? ['deletedFixedPriceVariantIds' => [], 'userErrors' => []];
     }
 
@@ -157,13 +157,13 @@ final class PriceLists extends AbstractResource
      *
      * @return list<array<string,mixed>>
      */
-    public function prices(string $id, int $first = self::MAX_PAGE_SIZE): array
+    public function prices(string $id, ?int $first = null): array
     {
-        $first = max(1, min($first, self::MAX_PAGE_SIZE));
-        $query = 'query ($id: ID!, $first: Int!) { priceList(id: $id) { prices(first: $first) {'
-            . ' nodes { variant { id } price { amount currencyCode } compareAtPrice { amount currencyCode } } } } }';
+        $query = 'query ($id: ID!, $first: Int!, $after: String) { priceList(id: $id) { prices(first: $first, after: $after) {'
+            . ' nodes { variant { id } price { amount currencyCode } compareAtPrice { amount currencyCode } }'
+            . ' pageInfo { hasNextPage endCursor } } } }';
 
-        return $this->gql->execute($query, ['id' => Gid::priceList($id), 'first' => $first])['priceList']['prices']['nodes'] ?? [];
+        return $this->paginateNodes($query, ['id' => Gid::priceList($id)], ['priceList', 'prices'], limit: $first);
     }
 
     /**
@@ -172,8 +172,8 @@ final class PriceLists extends AbstractResource
      */
     private static function coercePrice(array $price): array
     {
-        if (isset($price['variantId']) && !Gid::isGid((string) $price['variantId'])) {
-            $price['variantId'] = Gid::of('ProductVariant', $price['variantId']);
+        if (isset($price['variantId'])) {
+            $price['variantId'] = Gid::variant($price['variantId']);
         }
 
         return $price;

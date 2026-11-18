@@ -3,19 +3,28 @@
   "description": "Framework-independent PHP SDK for the Shopify Admin GraphQL API.",
   "type": "library",
   "license": "MIT",
-  "keywords": ["shopify", "graphql", "admin-api", "sdk", "ecommerce", "guzzle"],
+  "keywords": [
+    "shopify",
+    "graphql",
+    "admin-api",
+    "sdk",
+    "ecommerce",
+    "guzzle"
+  ],
   "authors": [
     {
       "name": "baldie81"
     }
   ],
   "require": {
-    "php": "^8.4",
+    "php": "^8.3",
     "ext-json": "*",
-    "guzzlehttp/guzzle": "^7.5"
+    "guzzlehttp/guzzle": "^7.15.2"
   },
   "require-dev": {
-    "phpunit/phpunit": "^10.5"
+    "phpstan/phpstan": "^2",
+    "phpunit/phpunit": "^10.5",
+    "webonyx/graphql-php": "^15"
   },
   "autoload": {
     "psr-4": {
@@ -33,8 +42,18 @@
     "sort-packages": true
   },
   "scripts": {
-    "test": "phpunit"
+    "test": "phpunit",
+    "stan": "phpstan analyse --no-progress --memory-limit=1G",
+    "schema": "@php bin/fetch-schema.php",
+    "check": [
+      "@stan",
+      "@test"
+    ]
   },
   "minimum-stability": "stable",
-  "prefer-stable": true
+  "prefer-stable": true,
+  "scripts-descriptions": {
+    "schema": "Download Shopify's Admin GraphQL schema so the schema-validation test can run.",
+    "check": "Static analysis + tests."
+  }
 }

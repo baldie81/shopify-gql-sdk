@@ -20,7 +20,11 @@ final class Customers extends AbstractResource
 {
     private const ADDRESS_BODY = 'id firstName lastName company address1 address2 city provinceCode countryCodeV2 zip phone';
 
+    // `email`/`phone` are deprecated by Shopify in favour of defaultEmailAddress /
+    // defaultPhoneNumber. Both are selected so existing callers keep working;
+    // the deprecated pair is dropped from the default selection in 2.0.
     private const FIELDS = 'id legacyResourceId email firstName lastName phone numberOfOrders createdAt updatedAt'
+        . ' defaultEmailAddress { emailAddress } defaultPhoneNumber { phoneNumber }'
         . ' defaultAddress { ' . self::ADDRESS_BODY . ' }';
 
     /**
@@ -102,16 +106,17 @@ final class Customers extends AbstractResource
     }
 
     /**
-     * A customer's addresses.
+     * A customer's addresses — every page, or at most `$first` when given.
      *
      * @return list<array<string,mixed>>
      */
-    public function addresses(string $customerId, int $first = 50): array
+    public function addresses(string $customerId, ?int $first = null): array
     {
-        $query = 'query ($id: ID!, $first: Int!) {'
-            . ' customer(id: $id) { addresses(first: $first) { id firstName lastName company address1 address2 city provinceCode countryCodeV2 zip phone } } }';
+        $query = 'query ($id: ID!, $first: Int!, $after: String) {'
+            . ' customer(id: $id) { addressesV2(first: $first, after: $after) {'
+            . ' nodes { ' . self::ADDRESS_BODY . ' } pageInfo { hasNextPage endCursor } } } }';
 
-        return $this->gql->execute($query, ['id' => Gid::customer($customerId), 'first' => $first])['customer']['addresses'] ?? [];
+        return $this->paginateNodes($query, ['id' => Gid::customer($customerId)], ['customer', 'addressesV2'], limit: $first);
     }
 
     /**

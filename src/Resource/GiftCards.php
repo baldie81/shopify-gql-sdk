@@ -6,6 +6,7 @@ namespace Baldie81\ShopifyGraphQL\Resource;
 
 use Baldie81\ShopifyGraphQL\Support\Gid;
 use Baldie81\ShopifyGraphQL\Support\GiftCardInput;
+use Baldie81\ShopifyGraphQL\Support\Money;
 
 /**
  * Gift cards — prepaid stored-value instruments. Issue them directly (store
@@ -140,7 +141,7 @@ final class GiftCards extends AbstractResource
      */
     private static function money(string|float $amount, string $currencyCode): array
     {
-        return ['amount' => number_format((float) $amount, 2, '.', ''), 'currencyCode' => $currencyCode];
+        return ['amount' => Money::decimal($amount), 'currencyCode' => strtoupper($currencyCode)];
     }
 
     private static function listQuery(?string $fields): string

@@ -12,18 +12,31 @@ final class ProductsMediaTest extends MockClientTestCase
 {
     public function testAddMediaSendsCreateMediaInput(): void
     {
-        $client = $this->mockClient([new Response(200, [], (string) json_encode([
-            'data' => ['productCreateMedia' => [
-                'media'           => [['id' => 'gid://shopify/MediaImage/1', 'alt' => 'front.jpg']],
-                'mediaUserErrors' => [],
-            ]],
-        ]))]);
+        $client = $this->mockClient([
+            // media already on the product (so the new node can be told apart)
+            new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
+                ['id' => 'gid://shopify/MediaImage/0', 'alt' => 'old.jpg'],
+            ]]]]])),
+            // productUpdate returns the product's media, newest first
+            new Response(200, [], (string) json_encode(['data' => ['productUpdate' => [
+                'product'    => ['id' => 'gid://shopify/Product/55', 'media' => ['nodes' => [
+                    ['id' => 'gid://shopify/MediaImage/1', 'alt' => 'front.jpg'],
+                ]]],
+                'userErrors' => [],
+            ]]])),
+        ]);
 
-        $client->products()->addMedia('55', [Media::image('https://cdn.example.com/front.jpg')]);
+        $result = $client->products()->addMedia('55', [Media::image('https://cdn.example.com/front.jpg')]);
+
+        // only the node that wasn't there before is reported as created
+        self::assertSame([['id' => 'gid://shopify/MediaImage/1', 'alt' => 'front.jpg']], $result['media']);
+        self::assertSame([], $result['userErrors']);
+        self::assertSame([], $result['mediaUserErrors']); // backward-compatible alias
 
         $body = $this->body();
-        self::assertStringContainsString('CreateMediaInput!', $body['query']);
-        self::assertSame('gid://shopify/Product/55', $body['variables']['productId']);
+        self::assertStringContainsString('productUpdate(product: $product, media: $media)', $body['query']);
+        self::assertStringNotContainsString('productCreateMedia', $body['query']); // deprecated
+        self::assertSame('gid://shopify/Product/55', $body['variables']['product']['id']);
         $media = $body['variables']['media'][0];
         self::assertSame('https://cdn.example.com/front.jpg', $media['originalSource']);
         self::assertSame('IMAGE', $media['mediaContentType']);
@@ -37,10 +50,12 @@ final class ProductsMediaTest extends MockClientTestCase
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
                 ['id' => 'gid://shopify/MediaImage/1', 'alt' => 'front.jpg', 'mediaContentType' => 'IMAGE'],
             ]]]]])),
-            // productCreateMedia for the missing one
-            new Response(200, [], (string) json_encode(['data' => ['productCreateMedia' => [
-                'media'           => [['id' => 'gid://shopify/MediaImage/2', 'alt' => 'back.jpg']],
-                'mediaUserErrors' => [],
+            // productUpdate for the missing one (returns media newest first)
+            new Response(200, [], (string) json_encode(['data' => ['productUpdate' => [
+                'product'    => ['id' => 'gid://shopify/Product/55', 'media' => ['nodes' => [
+                    ['id' => 'gid://shopify/MediaImage/2', 'alt' => 'back.jpg'],
+                ]]],
+                'userErrors' => [],
             ]]])),
         ]);
 
@@ -53,7 +68,9 @@ final class ProductsMediaTest extends MockClientTestCase
         self::assertCount(1, $result['added']);
         self::assertCount(2, $this->history);
 
-        // only the new media is sent to productCreateMedia
+        self::assertSame('gid://shopify/MediaImage/2', $result['added'][0]['id']);
+
+        // only the new media is sent
         $created = $this->body(1)['variables']['media'];
         self::assertCount(1, $created);
         self::assertSame('back.jpg', $created[0]['alt']);

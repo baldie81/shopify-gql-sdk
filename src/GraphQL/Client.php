@@ -5,11 +5,8 @@ declare(strict_types=1);
 namespace Baldie81\ShopifyGraphQL\GraphQL;
 
 use GuzzleHttp\ClientInterface;
-use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\GuzzleException;
-use GuzzleHttp\Exception\RequestException;
 use Baldie81\ShopifyGraphQL\Exception\GraphQLException;
-use Baldie81\ShopifyGraphQL\Exception\ShopifyException;
 use Baldie81\ShopifyGraphQL\Exception\ThrottledException;
 use Baldie81\ShopifyGraphQL\Exception\TransportException;
 use Psr\Http\Message\ResponseInterface;
@@ -21,7 +18,8 @@ use Psr\Http\Message\ResponseInterface;
  * class JSON-encodes the operation, decodes `{data, errors, extensions}`,
  * normalizes Guzzle errors into the SDK hierarchy, and — because Shopify
  * throttles on calculated query cost rather than request count — transparently
- * backs off and retries when a response is flagged `THROTTLED`.
+ * backs off and retries when a response is flagged `THROTTLED` (or is an HTTP
+ * 429). Any other non-2xx status, and any non-empty `errors` member, is thrown.
  */
 final class Client
 {
@@ -62,6 +60,11 @@ final class Client
     /**
      * Run a query or mutation and return the GraphQL `data` block.
      *
+     * Retries (up to `maxRetries`, with backoff) when Shopify throttles the
+     * request — a `THROTTLED` error in the body or an HTTP 429 — and, for
+     * *queries only*, on a transient 502/503/504. Mutations are never retried on
+     * a gateway error, since the write may already have been applied.
+     *
      * @param array<string,mixed> $variables
      * @return array<string,mixed>
      * @throws GraphQLException|ThrottledException|TransportException
@@ -71,21 +74,46 @@ final class Client
         $attempt = 0;
 
         while (true) {
-            $decoded = $this->send($query, $variables);
-            $errors  = $decoded['errors'] ?? [];
+            $response = $this->send($query, $variables);
+            $status   = $response->getStatusCode();
+            $body     = (string) $response->getBody();
+            $canRetry = $attempt < $this->maxRetries;
 
-            if (is_array($errors) && $errors !== []) {
+            if ($status === 429) {
+                if ($canRetry) {
+                    ($this->sleeper)($this->retryAfterMicros($response, $attempt));
+                    $attempt++;
+                    continue;
+                }
+
+                throw new ThrottledException('Shopify rate limited the request (HTTP 429).', $status);
+            }
+
+            if ($status < 200 || $status >= 300) {
+                if ($canRetry && in_array($status, [502, 503, 504], true) && !self::isMutation($query)) {
+                    ($this->sleeper)($this->retryAfterMicros($response, $attempt));
+                    $attempt++;
+                    continue;
+                }
+
+                throw $this->httpError($status, $body);
+            }
+
+            $decoded = $this->decode($status, $body);
+            $errors  = self::normalizeErrors($decoded['errors'] ?? null);
+
+            if ($errors !== []) {
                 if ($this->isThrottled($errors)) {
-                    if ($attempt < $this->maxRetries) {
+                    if ($canRetry) {
                         ($this->sleeper)($this->backoffMicros($decoded));
                         $attempt++;
                         continue;
                     }
 
-                    throw ThrottledException::fromResponse($errors, $decoded['extensions'] ?? []);
+                    throw ThrottledException::fromResponse($errors, (array) ($decoded['extensions'] ?? []));
                 }
 
-                throw GraphQLException::fromErrors($errors);
+                throw GraphQLException::fromErrors($errors, $status);
             }
 
             return (array) ($decoded['data'] ?? []);
@@ -94,60 +122,92 @@ final class Client
 
     /**
      * @param array<string,mixed> $variables
-     * @return array<string,mixed>
      */
-    private function send(string $query, array $variables): array
+    private function send(string $query, array $variables): ResponseInterface
     {
         try {
-            $response = $this->client->request('POST', $this->path, [
+            return $this->client->request('POST', $this->path, [
                 // Cast to object so empty variables serialise as `{}`, not `[]`.
-                'json' => ['query' => $query, 'variables' => (object) $variables],
+                'json'        => ['query' => $query, 'variables' => (object) $variables],
+                // Statuses are handled here, uniformly, whatever the injected
+                // client's own `http_errors` setting is.
+                'http_errors' => false,
             ]);
-        } catch (ConnectException $e) {
-            throw new TransportException($e->getMessage(), 0, $e);
-        } catch (RequestException $e) {
-            throw $this->httpError($e);
         } catch (GuzzleException $e) {
             throw new TransportException($e->getMessage(), 0, $e);
         }
-
-        return $this->decode($response);
     }
 
-    private function httpError(RequestException $e): ShopifyException
+    /**
+     * A non-2xx response. Shopify reports auth/routing failures as
+     * `{"errors": "…"}` (a string, not a list), so surface that text.
+     */
+    private function httpError(int $status, string $body): GraphQLException
     {
-        $response = $e->getResponse();
-        if ($response === null) {
-            return new TransportException($e->getMessage(), 0, $e);
-        }
+        $decoded = json_decode($body, true);
+        $errors  = self::normalizeErrors(is_array($decoded) ? ($decoded['errors'] ?? null) : null);
+        $detail  = $errors === [] ? '' : ' ' . implode('; ', array_column($errors, 'message'));
 
-        $status = $response->getStatusCode();
-        $body   = (string) $response->getBody();
-
-        if ($status === 429) {
-            return new ThrottledException('Shopify rate limited the request (HTTP 429).', $status, $e);
-        }
-
-        return new GraphQLException("Shopify returned HTTP {$status}.", $status, $e, rawBody: $body);
+        return new GraphQLException("Shopify returned HTTP {$status}.{$detail}", $status, errors: $errors, rawBody: $body);
     }
 
     /**
      * @return array<string,mixed>
      */
-    private function decode(ResponseInterface $response): array
+    private function decode(int $status, string $body): array
     {
-        $body    = (string) $response->getBody();
         $decoded = $body === '' ? [] : json_decode($body, true);
 
         if (!is_array($decoded)) {
-            throw new GraphQLException(
-                'Malformed JSON in Shopify response.',
-                $response->getStatusCode(),
-                rawBody: $body,
-            );
+            throw new GraphQLException('Malformed JSON in Shopify response.', $status, rawBody: $body);
         }
 
         return $decoded;
+    }
+
+    /**
+     * Coerce the response's `errors` member — normally a list of error objects,
+     * but a bare string (or a map) on some failures — to a list of
+     * `['message' => …, …]` arrays. Empty when there is no error.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private static function normalizeErrors(mixed $errors): array
+    {
+        if ($errors === null || $errors === '' || $errors === []) {
+            return [];
+        }
+        if (!is_array($errors)) {
+            return [['message' => is_scalar($errors) ? (string) $errors : 'Unknown GraphQL error']];
+        }
+        if (!array_is_list($errors)) {
+            return [['message' => (string) json_encode($errors)]];
+        }
+
+        return array_map(
+            static fn (mixed $error): array => is_array($error)
+                ? $error
+                : ['message' => is_scalar($error) ? (string) $error : 'Unknown GraphQL error'],
+            $errors,
+        );
+    }
+
+    private static function isMutation(string $query): bool
+    {
+        return preg_match('/^\s*mutation\b/', $query) === 1;
+    }
+
+    /**
+     * How long to wait before retrying an HTTP-level 429/5xx: the `Retry-After`
+     * header when present, otherwise 1s, 2s, 4s… — clamped to 0.2s–10s.
+     */
+    private function retryAfterMicros(ResponseInterface $response, int $attempt): int
+    {
+        $header  = $response->getHeaderLine('Retry-After');
+        $seconds = is_numeric($header) ? (float) $header : (float) (2 ** $attempt);
+        $seconds = max(0.2, min($seconds, 10.0));
+
+        return (int) ceil($seconds * 1_000_000);
     }
 
     /**
@@ -167,7 +227,7 @@ final class Client
     /**
      * Work out how long to wait before retrying a throttled request, from the
      * cost block: (requested - available) / restoreRate seconds, clamped to a
-     * sane 0.2s–5s window.
+     * sane 0.2s–10s window.
      *
      * @param array<string,mixed> $decoded
      */
@@ -181,7 +241,7 @@ final class Client
 
         $deficit = max(0.0, $requested - $available);
         $seconds = $restore > 0 ? $deficit / $restore : 1.0;
-        $seconds = max(0.2, min($seconds, 5.0));
+        $seconds = max(0.2, min($seconds, 10.0));
 
         return (int) ceil($seconds * 1_000_000);
     }

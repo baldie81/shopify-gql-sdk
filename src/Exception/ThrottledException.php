@@ -14,15 +14,17 @@ use Throwable;
 final class ThrottledException extends GraphQLException
 {
     /**
-     * @param array<string,mixed> $cost the `extensions.cost` block, if present
+     * @param array<string,mixed>       $cost   the `extensions.cost` block, if present
+     * @param list<array<string,mixed>> $errors the raw GraphQL `errors[]`
      */
     public function __construct(
         string                $message,
         int                   $statusCode = 200,
         ?Throwable            $previous = null,
         public readonly array $cost = [],
+        array                 $errors = [],
     ) {
-        parent::__construct($message, $statusCode, $previous);
+        parent::__construct($message, $statusCode, $previous, $errors);
     }
 
     /**
@@ -33,6 +35,6 @@ final class ThrottledException extends GraphQLException
     {
         $message = (string) ($errors[0]['message'] ?? 'Shopify throttled the request.');
 
-        return new self($message, 200, cost: $extensions['cost'] ?? []);
+        return new self($message, 200, cost: (array) ($extensions['cost'] ?? []), errors: $errors);
     }
 }

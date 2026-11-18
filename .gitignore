@@ -1,7 +1,7 @@
 /vendor/
 /composer.lock
 .phpunit.cache/
-/examples_local/.env
 .idea/
 .env
 examples_local/
+/tests/fixtures/schema/

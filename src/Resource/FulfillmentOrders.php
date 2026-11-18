@@ -41,13 +41,13 @@ final class FulfillmentOrders extends AbstractResource
      *
      * @return list<array<string,mixed>>
      */
-    public function forOrder(string $orderId, int $first = self::MAX_PAGE_SIZE): array
+    public function forOrder(string $orderId, ?int $first = null): array
     {
-        $first = max(1, min($first, self::MAX_PAGE_SIZE));
-        $query = 'query ($id: ID!, $first: Int!) { order(id: $id) { fulfillmentOrders(first: $first) {'
-            . ' nodes { ' . self::FIELDS . ' assignedLocation { location { id name } } } } } }';
+        $query = 'query ($id: ID!, $first: Int!, $after: String) { order(id: $id) { fulfillmentOrders(first: $first, after: $after) {'
+            . ' nodes { ' . self::FIELDS . ' assignedLocation { location { id name } } }'
+            . ' pageInfo { hasNextPage endCursor } } } }';
 
-        return $this->gql->execute($query, ['id' => Gid::order($orderId), 'first' => $first])['order']['fulfillmentOrders']['nodes'] ?? [];
+        return $this->paginateNodes($query, ['id' => Gid::order($orderId)], ['order', 'fulfillmentOrders'], limit: $first);
     }
 
     /**

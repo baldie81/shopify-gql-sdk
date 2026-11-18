@@ -34,6 +34,9 @@ final class Files extends AbstractResource
         'svg'  => 'image/svg+xml',
     ];
 
+    /** Default total timeout (seconds) for pushing one file to its staged target. */
+    public const float UPLOAD_TIMEOUT = 120.0;
+
     private readonly ClientInterface $uploader;
 
     public function __construct(Client $gql, ?ClientInterface $uploader = null)
@@ -41,7 +44,7 @@ final class Files extends AbstractResource
         parent::__construct($gql);
         // A plain client (no Shopify auth headers) for POSTing bytes to the
         // external staged-upload target.
-        $this->uploader = $uploader ?? new GuzzleClient(['timeout' => 60.0]);
+        $this->uploader = $uploader ?? new GuzzleClient(['timeout' => self::UPLOAD_TIMEOUT, 'connect_timeout' => 10.0]);
     }
 
     /**
@@ -59,7 +62,7 @@ final class Files extends AbstractResource
         $mimeType ??= self::guessMime($filename);
 
         $target = $this->stage($filename, $mimeType, 'IMAGE');
-        $this->pushBody($target, fopen($path, 'r'), $filename, $mimeType);
+        $this->pushBody($target, self::open($path), $filename, $mimeType);
 
         return (string) $target['resourceUrl'];
     }
@@ -95,7 +98,7 @@ final class Files extends AbstractResource
 
         $urls = [];
         foreach ($meta as $i => [$path, $filename, $mimeType]) {
-            $this->pushBody($targets[$i], fopen($path, 'r'), $filename, $mimeType);
+            $this->pushBody($targets[$i], self::open($path), $filename, $mimeType);
             $urls[] = (string) $targets[$i]['resourceUrl'];
         }
 
@@ -153,6 +156,41 @@ final class Files extends AbstractResource
 
         return $this->gql->execute($mutation, ['files' => $this->payloads($files)])['fileUpdate']
             ?? ['files' => [], 'userErrors' => []];
+    }
+
+    /**
+     * `fileDelete` — permanently delete files (media) from the store. This also
+     * removes them from every product that references them.
+     *
+     * @param list<string> $fileIds file/media GIDs
+     * @return array{deletedFileIds:list<string>,userErrors:list<array<string,mixed>>}
+     */
+    public function delete(array $fileIds): array
+    {
+        if ($fileIds === []) {
+            return ['deletedFileIds' => [], 'userErrors' => []];
+        }
+
+        $mutation = 'mutation ($fileIds: [ID!]!) {'
+            . ' fileDelete(fileIds: $fileIds) { deletedFileIds userErrors { field message code } } }';
+
+        $result = $this->gql->execute($mutation, ['fileIds' => array_values($fileIds)])['fileDelete'] ?? [];
+
+        return ['deletedFileIds' => $result['deletedFileIds'] ?? [], 'userErrors' => $result['userErrors'] ?? []];
+    }
+
+    /**
+     * @return resource
+     * @throws UploadException
+     */
+    private static function open(string $path)
+    {
+        $handle = @fopen($path, 'r');
+        if ($handle === false) {
+            throw new UploadException("Could not open file for reading: {$path}");
+        }
+
+        return $handle;
     }
 
     /**

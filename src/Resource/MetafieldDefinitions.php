@@ -90,15 +90,14 @@ final class MetafieldDefinitions extends AbstractResource
      *
      * @return list<array<string,mixed>>
      */
-    public function all(string $ownerType, int $first = 250): array
+    public function all(string $ownerType, ?int $first = null): array
     {
-        $query = 'query ($ownerType: MetafieldOwnerType!, $first: Int!) {'
-            . ' metafieldDefinitions(ownerType: $ownerType, first: $first) {'
-            . ' nodes { id name namespace key description ownerType pinnedPosition type { name } } } }';
+        $query = 'query ($ownerType: MetafieldOwnerType!, $first: Int!, $after: String) {'
+            . ' metafieldDefinitions(ownerType: $ownerType, first: $first, after: $after) {'
+            . ' nodes { id name namespace key description ownerType pinnedPosition type { name } }'
+            . ' pageInfo { hasNextPage endCursor } } }';
 
-        $first = max(1, min($first, 250));
-
-        return $this->gql->execute($query, ['ownerType' => $ownerType, 'first' => $first])['metafieldDefinitions']['nodes'] ?? [];
+        return $this->paginateNodes($query, ['ownerType' => $ownerType], 'metafieldDefinitions', limit: $first);
     }
 
     /**

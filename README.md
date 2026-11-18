@@ -1,7 +1,7 @@
 # Shopify Admin GraphQL PHP SDK
 
 A small, **framework-independent** PHP client for the Shopify **Admin GraphQL**
-API. No framework coupling — just PHP 8.4+ and Guzzle. Shopify is deprecating the
+API. No framework coupling — just PHP 8.3+ and Guzzle. Shopify is deprecating the
 REST Admin API, so this is GraphQL-only from the start.
 
 ## What's here
@@ -55,7 +55,8 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Enums`** — `ProductStatus`, `MetafieldType`, `MediaContentType`,
   `BulkOperationStatus`, `BulkOperationType`, `WebhookTopic`, `ProductTranslatableField`.
 - **`Exceptions`** — `GraphQLException` (top-level errors / non-2xx), `ThrottledException`
-  (cost-limit / 429), `TransportException`, under a `ShopifyException` base.
+  (cost-limit / 429), `TransportException`, `UploadException`, `PollTimeoutException`,
+  under a `ShopifyException` base.
 
 ## Quick start
 
@@ -71,6 +72,14 @@ $shopify = ShopifyClient::create(new Configuration(
 
 $product = $shopify->products()->get('123');   // numeric id or a GID
 ```
+
+`shop` accepts a handle, a hostname or a pasted URL; anything that isn't a
+hostname throws `InvalidArgumentException` up front. Optional settings: `timeout`,
+`connectTimeout`, `verifySsl` (these also apply to staged uploads and bulk-result
+downloads) and `maxRetries` (default 2).
+
+Already have a configured Guzzle client? `ShopifyClient::fromGuzzle($guzzle)` reads
+the API version from its `base_uri` (`…/admin/api/<version>/`).
 
 ## Products
 
@@ -160,7 +169,15 @@ $shopify->products()->addMedia($productId, [...]);  // raw, non-idempotent escap
 ```
 
 > Idempotency is keyed on `alt` because that's the only writable, queryable string
-> on a media object — so reserve `alt` as a stable key per asset.
+> on a media object — so reserve `alt` as a stable key per asset. **Trade-off:**
+> the key is what shoppers' screen readers and search engines see as the image's
+> alt text, and if a merchant edits the alt text in the admin the media no longer
+> matches its key (the next sync adds it again). If you need descriptive alt text,
+> keep your own `key → media id` map from the `syncMedia()` result (`media[].id`)
+> and use `files()->update()` / `deleteMedia()` directly.
+
+Media is attached with `productUpdate(media: …)` and removed with `fileUpdate`
+(the older `productCreateMedia` / `productDeleteMedia` are deprecated by Shopify).
 
 ### Local files & the `SKU_1.jpg` / `SKU_2.jpg` workflow
 
@@ -204,8 +221,13 @@ $shopify->products()->syncMedia($productId, $slots, prune: true);
 ```
 
 The low-level pieces are available too: `files()->upload($path)`,
-`files()->update([...])`, `products()->reorderMedia($id, $orderedIds)`, and
+`files()->update([...])`, `files()->delete($ids)`,
+`products()->reorderMedia($id, $orderedIds)`, and
 `products()->deleteMedia($id, $mediaIds)`.
+
+`deleteMedia()` (and `prune`) **detaches** media from the product — the file stays
+in the store's Files library and on any other product using it. Pass
+`deleteFiles: true` to delete the files outright.
 
 ## Variants, prices & inventory
 
@@ -229,7 +251,12 @@ $shopify->products()->set([
 // Prices: read variants, then set price / compareAtPrice and enable tracking.
 $variants = $shopify->variants()->list($productId);   // id, sku, price, compareAtPrice, inventoryItem { id, tracked }
 $shopify->variants()->update($productId, [
-    VariantInput::make($variants[0]['id'])->price(17.50)->compareAtPrice(24.00)->tracked(),
+    VariantInput::make($variants[0]['id'])->price('17.50')->compareAtPrice('24.00')->tracked(),
+]);
+
+// Add a variant to an existing product:
+$shopify->variants()->create($productId, [
+    VariantInput::new()->optionValue('Color', 'Green')->price('19.90')->sku('TEE-GREEN'),
 ]);
 
 // Inventory: pick a location, then set absolute quantities (or adjust by delta).
@@ -255,9 +282,20 @@ cross-product writes, see the bulk-mutation path under "Bulk operations".
 via `Configuration::apiVersion`). On 2026-04+, the inventory and `orders()->refund()`
 mutations attach the now-mandatory `@idempotent` directive (a UUID is generated per
 call/chunk; pass `idempotencyKey:` for your own retry-safe key), and `setQuantities`
-resolves the required `changeFromQuantity` (compare-and-swap) for you — supply it
-yourself in an entry to opt into a guarded set. On ≤2026-01 the behaviour is
-unchanged.
+sends the now-required `changeFromQuantity` as `null` — an unconditional set, with
+no extra read. Supply `'changeFromQuantity' => N` in an entry to opt into a guarded
+(compare-and-swap) set. On ≤2026-01 the behaviour is unchanged.
+
+**Amounts.** Pass money as **strings** (`'17.50'`): they're sent digit-for-digit,
+so three-decimal currencies survive. Floats are accepted as a convenience. Anything
+that isn't a plain decimal (`'1,50'`, `'€5'`) throws `InvalidArgumentException`
+instead of being silently coerced.
+
+**Lists are complete.** `variants()->list()`, `collections()->products()`,
+`priceLists()->prices()`, `metafieldDefinitions()->all()`, `inventory()->locations()`,
+`customers()->addresses()`, `products()->media()` and
+`fulfillmentOrders()->forOrder()` walk every page. Pass a number as `$first` to cap
+how many come back.
 
 ## Bulk operations
 
@@ -269,6 +307,8 @@ $bulk = $shopify->bulkOperations();
 
 $op = $bulk->runQuery('{ products { edges { node { id title } } } }')['bulkOperation'];
 $final = $bulk->poll($op['id']);          // waits until COMPLETED/FAILED/CANCELED/EXPIRED
+// Still running after the budget (default 300 polls × 2s)? poll() throws
+// PollTimeoutException — $e->operation is the last-seen state; poll again or cancel.
 
 if (($final['status'] ?? null) === 'COMPLETED') {
     foreach ($bulk->results($final) as $row) {   // downloads `url`, yields one decoded line at a time
@@ -278,6 +318,7 @@ if (($final['status'] ?? null) === 'COMPLETED') {
 // on failure: $final['status'] === 'FAILED' with $final['errorCode']; results($final, partial: true) reads partialDataUrl
 
 $bulk->current(BulkOperationType::Query); // most recent op of a type (or 'QUERY')
+$bulk->list('status:running');            // recent operations, newest first (2026-01+)
 $bulk->cancel($op['id']);
 ```
 
@@ -287,10 +328,10 @@ does the whole flow — serialise the rows to JSONL, upload them as a
 
 ```php
 $started = $shopify->bulkOperations()->importMutation(
-    'mutation call($input: ProductInput!) { productUpdate(input: $input) { product { id } userErrors { field } } }',
+    'mutation call($product: ProductUpdateInput!) { productUpdate(product: $product) { product { id } userErrors { field } } }',
     [
-        ['input' => ['id' => 'gid://shopify/Product/1', 'title' => 'A']],
-        ['input' => ['id' => 'gid://shopify/Product/2', 'title' => 'B']],
+        ['product' => ['id' => 'gid://shopify/Product/1', 'title' => 'A']],
+        ['product' => ['id' => 'gid://shopify/Product/2', 'title' => 'B']],
     ],
 );
 $final = $shopify->bulkOperations()->poll($started['bulkOperation']['id']);
@@ -472,7 +513,7 @@ to keep the built-in selection.
 ```php
 use Baldie81\ShopifyGraphQL\Support\GiftCardInput;
 
-$result = $shopify->giftCards()->create(GiftCardInput::make('25.00')->note('Loyalty reward')); // EUR by default
+$result = $shopify->giftCards()->create(GiftCardInput::make('25.00', 'EUR')->note('Loyalty reward'));
 $code   = $result['giftCardCode'];   // ⚠ the plaintext code is returned ONLY here — capture it
 
 // Other currency, sent to a recipient with a personal message on a schedule
@@ -520,7 +561,7 @@ than just a success flag:
 | `get()` / `search*()` | product nodes with `id` + `legacyResourceId` + timestamps |
 | `setMetafields()` | `metafields` (`id` GID, `legacyResourceId`, `namespace/key/type/value`, timestamps), `userErrors` |
 | `syncMedia()` | `media` (`{ key, id (GID), action }` per slot), `created`/`replaced`/`pruned`, `orderedIds`, `reorder.job`, aggregated `userErrors` |
-| `addMedia()` / `ensureMedia()` / `deleteMedia()` | media nodes / `deletedMediaIds` with `id`s, plus `mediaUserErrors` |
+| `addMedia()` / `ensureMedia()` / `deleteMedia()` | the created media nodes / `deletedMediaIds` with `id`s, plus `mediaUserErrors` |
 | `setTranslations()` / `translations()->set()/register()` | `translations` (each with `translatableContentDigest`), the `digests` map, `userErrors`, `skipped` |
 | `bulkOperations()` | `bulkOperation` (`id`, `status`, `url`, `objectCount`, …), `userErrors` |
 | `files()->upload()` | the `resourceUrl`; `update()` returns files + `userErrors` |
@@ -529,7 +570,8 @@ Notes:
 - **Numeric ids:** products/metafields include `legacyResourceId`; for *any* GID,
   `Gid::id($gid)` returns the trailing numeric id.
 - **Errors are data, never swallowed:** `userErrors`/`mediaUserErrors` come back on
-  the result for logging (only transport/throttle/HTTP failures throw).
+  the result for logging. Transport, throttle and HTTP failures throw — including
+  auth failures (401/403), which Shopify reports as a bare `{"errors": "…"}` string.
 - **Digests:** persist the per-translation `translatableContentDigest` so you can
   later detect "outdated" translations or re-register safely.
 
@@ -545,8 +587,11 @@ Notes:
   `errors[]` / non-2xx (`GraphQLException`, incl. `ThrottledException`), and
   (3) **`userErrors`** inside mutation payloads — business validation returned as
   **data, not thrown**, so you inspect `$result['userErrors']`.
-- **Throttling.** The client detects `extensions.code = THROTTLED` (and HTTP 429),
-  computes a backoff from `extensions.cost`, and retries (default 2 attempts).
+- **Throttling & retries.** The client detects `extensions.code = THROTTLED` and
+  HTTP 429, backs off (from `extensions.cost` / `Retry-After`) and retries —
+  `Configuration::maxRetries`, default 2. A transient 502/503/504 is retried for
+  **queries only**: a mutation may already have been applied, so it is never
+  blindly re-sent.
 - **GIDs.** Everything is identified by `gid://shopify/<Type>/<id>`; helpers coerce
   numeric ids and extract them back.
 - **Versioning.** The dated `apiVersion` is part of the endpoint and defaults to
@@ -585,8 +630,20 @@ composer install
 composer test
 ```
 
-Unit tests mock Guzzle (no network). For live usage, point an `ExampleClient` at
-a test store and run an example class.
+Unit tests mock Guzzle (no network). Because mocked responses can't tell you that
+Shopify would reject a query, one test validates **every operation the SDK sends**
+— documents, builder-produced variables, and use of deprecated fields — against
+Shopify's real Admin schema. It needs the schema downloaded once (it's skipped
+otherwise):
+
+```bash
+composer schema    # fetch the public Admin GraphQL schema into tests/fixtures/schema/
+composer check     # PHPStan + the full test suite
+```
+
+For live usage, point an `ExampleClient` at a test store and run an example class.
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## Not yet
 

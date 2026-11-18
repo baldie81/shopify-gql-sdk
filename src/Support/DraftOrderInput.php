@@ -43,13 +43,17 @@ final class DraftOrderInput implements Arrayable
     /**
      * Add a custom (non-catalog) line item with a title and unit price.
      */
-    public function customLineItem(string $title, string|float $unitPrice, int $quantity = 1): self
+    public function customLineItem(string $title, string|float $unitPrice, int $quantity = 1, ?string $currencyCode = null): self
     {
-        $this->lineItems[] = [
-            'title'             => $title,
-            'originalUnitPrice' => number_format((float) $unitPrice, 2, '.', ''),
-            'quantity'          => $quantity,
-        ];
+        // With a currency the price goes out as `originalUnitPriceWithCurrency`,
+        // which replaces the deprecated currency-less `originalUnitPrice`.
+        $price = $currencyCode !== null
+            ? ['originalUnitPriceWithCurrency' => ['amount' => Money::decimal($unitPrice), 'currencyCode' => strtoupper($currencyCode)]]
+            : ['originalUnitPrice' => Money::decimal($unitPrice)];
+
+        $item = ['title' => $title] + $price + ['quantity' => $quantity];
+
+        $this->lineItems[] = $item;
 
         return $this;
     }

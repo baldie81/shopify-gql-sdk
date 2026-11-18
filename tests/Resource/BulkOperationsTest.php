@@ -73,23 +73,29 @@ final class BulkOperationsTest extends TestCase
     public function testCurrentAcceptsEnumType(): void
     {
         $bulk = $this->resource([new Response(200, [], (string) json_encode([
-            'data' => ['currentBulkOperation' => ['id' => 'gid://shopify/BulkOperation/9', 'status' => 'COMPLETED']],
+            'data' => ['bulkOperations' => ['nodes' => [['id' => 'gid://shopify/BulkOperation/9', 'status' => 'COMPLETED']], 'pageInfo' => ['hasNextPage' => true, 'endCursor' => 'c']]],
         ]))]);
 
-        $bulk->current(BulkOperationType::Mutation);
+        $op = $bulk->current(BulkOperationType::Mutation);
 
+        self::assertSame('gid://shopify/BulkOperation/9', $op['id']);
         $body = json_decode((string) $this->history[0]['request']->getBody(), true);
-        self::assertSame('MUTATION', $body['variables']['type']);
+        // newest operation of that type, via the non-deprecated connection
+        self::assertStringContainsString('bulkOperations(', $body['query']);
+        self::assertStringNotContainsString('currentBulkOperation', $body['query']);
+        self::assertSame('operation_type:mutation', $body['variables']['query']);
+        self::assertSame(1, $body['variables']['first']);
+        self::assertCount(1, $this->history); // limit 1: no second page fetched
     }
 
     public function testCurrentStillAcceptsStringType(): void
     {
-        $bulk = $this->resource([new Response(200, [], (string) json_encode(['data' => ['currentBulkOperation' => null]]))]);
+        $bulk = $this->resource([new Response(200, [], (string) json_encode(['data' => ['bulkOperations' => ['nodes' => [], 'pageInfo' => ['hasNextPage' => false, 'endCursor' => null]]]]))]);
 
-        $bulk->current('QUERY'); // backward-compatible
+        self::assertNull($bulk->current('QUERY')); // backward-compatible
 
         $body = json_decode((string) $this->history[0]['request']->getBody(), true);
-        self::assertSame('QUERY', $body['variables']['type']);
+        self::assertSame('operation_type:query', $body['variables']['query']);
     }
 
     public function testPollLoopsUntilTerminalStatus(): void
@@ -103,6 +109,20 @@ final class BulkOperationsTest extends TestCase
 
         self::assertSame('COMPLETED', $op['status']);
         self::assertCount(2, $this->history); // polled twice
+    }
+
+    public function testPollThrowsWhenStillRunningAfterTheBudget(): void
+    {
+        $running = (string) json_encode(['data' => ['node' => ['id' => '1', 'status' => 'RUNNING']]]);
+        $bulk    = $this->resource([new Response(200, [], $running), new Response(200, [], $running), new Response(200, [], $running)]);
+
+        try {
+            $bulk->poll('gid://shopify/BulkOperation/1', maxAttempts: 2);
+            self::fail('expected PollTimeoutException');
+        } catch (\Baldie81\ShopifyGraphQL\Exception\PollTimeoutException $e) {
+            self::assertSame('RUNNING', $e->operation['status']); // last-seen state, to resume or cancel
+            self::assertCount(3, $this->history);
+        }
     }
 
     public function testImportMutationStagesJsonlThenRunsMutation(): void

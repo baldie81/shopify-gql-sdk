@@ -26,16 +26,20 @@ final class Inventory extends AbstractResource
      *
      * @return list<array<string,mixed>>
      */
-    public function locations(int $first = 50): array
+    public function locations(?int $first = null): array
     {
-        $query = 'query ($first: Int!) { locations(first: $first) { nodes { id name isActive shipsInventory } } }';
+        $query = 'query ($first: Int!, $after: String) { locations(first: $first, after: $after) {'
+            . ' nodes { id name isActive shipsInventory } pageInfo { hasNextPage endCursor } } }';
 
-        return $this->gql->execute($query, ['first' => $first])['locations']['nodes'] ?? [];
+        return $this->paginateNodes($query, [], 'locations', limit: $first);
     }
 
     /**
      * Set absolute quantities (overwrites). Each entry is
-     * `['inventoryItemId' => …, 'locationId' => …, 'quantity' => N]`.
+     * `['inventoryItemId' => …, 'locationId' => …, 'quantity' => N]`. Add
+     * `'changeFromQuantity' => M` to an entry to make it a compare-and-swap (the
+     * write is rejected unless the current quantity is M); without it the set is
+     * unconditional.
      *
      * @param list<array<string,mixed>> $quantities
      * @return array{inventoryAdjustmentGroup:?array<string,mixed>,userErrors:list<array<string,mixed>>}
@@ -51,82 +55,19 @@ final class Inventory extends AbstractResource
         $base       = ['name' => $name, 'reason' => $reason];
         $quantities = array_values($quantities);
         if ($idem) {
-            // 2026-04 removed unconditional sets: each entry needs changeFromQuantity
-            // (compare-and-swap). Resolve the current value for any entry that
-            // didn't supply one, so "set to N" still works.
-            $quantities = $this->fillChangeFromQuantity($quantities, $name);
+            // 2026-04+: every entry must carry `changeFromQuantity`. An explicit
+            // null skips the compare-and-swap check ("set to N, whatever it was");
+            // a caller-supplied value is kept as a deliberate guard.
+            $quantities = array_map(
+                static fn (array $q): array => array_key_exists('changeFromQuantity', $q) ? $q : $q + ['changeFromQuantity' => null],
+                $quantities,
+            );
         } else {
             // Pre-2026-04: bypass the compare check.
             $base['ignoreCompareQuantity'] = true;
         }
 
         return $this->bulk($mutation, 'inventorySetQuantities', 'quantities', $quantities, $base, $idem, $idempotencyKey);
-    }
-
-    /**
-     * Fill `changeFromQuantity` (the current value) for entries that omit it, by
-     * reading the live quantities once. Caller-supplied `changeFromQuantity` (a
-     * deliberate compare-and-swap guard) is left untouched.
-     *
-     * @param list<array<string,mixed>> $quantities
-     * @return list<array<string,mixed>>
-     */
-    private function fillChangeFromQuantity(array $quantities, string $name): array
-    {
-        $itemIds = [];
-        foreach ($quantities as $q) {
-            if (!array_key_exists('changeFromQuantity', $q) && isset($q['inventoryItemId'])) {
-                $itemIds[(string) $q['inventoryItemId']] = true;
-            }
-        }
-        if ($itemIds === []) {
-            return $quantities;
-        }
-
-        $current = $this->currentQuantities(array_keys($itemIds), $name);
-        foreach ($quantities as &$q) {
-            if (!array_key_exists('changeFromQuantity', $q)) {
-                $q['changeFromQuantity'] = $current["{$q['inventoryItemId']}|{$q['locationId']}"] ?? 0;
-            }
-        }
-        unset($q);
-
-        return $quantities;
-    }
-
-    /**
-     * Map of "inventoryItemId|locationId" => current quantity for the named state.
-     *
-     * @param list<string> $itemIds
-     * @return array<string,int>
-     */
-    private function currentQuantities(array $itemIds, string $name): array
-    {
-        $query = 'query ($ids: [ID!]!, $name: String!) { nodes(ids: $ids) { ... on InventoryItem { id'
-            . ' inventoryLevels(first: 50) { nodes { location { id } quantities(names: [$name]) { name quantity } } } } } }';
-
-        $map = [];
-        foreach (array_chunk($itemIds, self::MAX_QUANTITIES) as $chunk) {
-            foreach ($this->gql->execute($query, ['ids' => $chunk, 'name' => $name])['nodes'] ?? [] as $node) {
-                $item = $node['id'] ?? null;
-                if ($item === null) {
-                    continue;
-                }
-                foreach ($node['inventoryLevels']['nodes'] ?? [] as $level) {
-                    $loc = $level['location']['id'] ?? null;
-                    if ($loc === null) {
-                        continue;
-                    }
-                    foreach ($level['quantities'] ?? [] as $q) {
-                        if (($q['name'] ?? null) === $name) {
-                            $map["{$item}|{$loc}"] = (int) $q['quantity'];
-                        }
-                    }
-                }
-            }
-        }
-
-        return $map;
     }
 
     /**

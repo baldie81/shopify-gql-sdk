@@ -45,9 +45,14 @@ final class VariantsTest extends MockClientTestCase
             'data' => ['productVariantsBulkCreate' => ['productVariants' => [['id' => 'gid://shopify/ProductVariant/9']], 'userErrors' => []]],
         ]))]);
 
-        $client->variants()->create('55', [VariantInput::make('x')->price(9.99)]);
+        $client->variants()->create('55', [VariantInput::new()->optionValue('Size', 'XL')->price(9.99)]);
 
         self::assertStringContainsString('productVariantsBulkCreate', $this->body()['query']);
+        // a variant being created carries its option values and no id
+        self::assertSame(
+            [['price' => '9.99', 'optionValues' => [['optionName' => 'Size', 'name' => 'XL']]]],
+            $this->body()['variables']['variants'],
+        );
     }
 
     public function testUpdateChunksAtTheLimit(): void
@@ -78,5 +83,32 @@ final class VariantsTest extends MockClientTestCase
         $body = $this->body();
         self::assertStringContainsString('productVariantsBulkDelete', $body['query']);
         self::assertSame(['gid://shopify/ProductVariant/1', 'gid://shopify/ProductVariant/2'], $body['variables']['variantsIds']);
+    }
+
+    public function testListWalksEveryPageOfANestedConnection(): void
+    {
+        $page = static fn (array $ids, bool $more): Response => new Response(200, [], (string) json_encode(['data' => ['product' => ['variants' => [
+            'nodes'    => array_map(static fn (string $id): array => ['id' => $id], $ids),
+            'pageInfo' => ['hasNextPage' => $more, 'endCursor' => $more ? 'cur1' : null],
+        ]]]]));
+        $client = $this->mockClient([$page(['v1', 'v2'], true), $page(['v3'], false)]);
+
+        // Products can have far more than 250 variants; none may be dropped.
+        self::assertSame(['v1', 'v2', 'v3'], array_column($client->variants()->list('55'), 'id'));
+        self::assertCount(2, $this->history);
+        self::assertSame(250, $this->body(0)['variables']['first']);
+        self::assertSame('cur1', $this->body(1)['variables']['after']);
+    }
+
+    public function testListHonoursAnExplicitLimit(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode(['data' => ['product' => ['variants' => [
+            'nodes'    => [['id' => 'v1'], ['id' => 'v2']],
+            'pageInfo' => ['hasNextPage' => true, 'endCursor' => 'cur1'],
+        ]]]]))]);
+
+        self::assertCount(2, $client->variants()->list('55', 2));
+        self::assertCount(1, $this->history); // limit reached: no further page
+        self::assertSame(2, $this->body(0)['variables']['first']);
     }
 }

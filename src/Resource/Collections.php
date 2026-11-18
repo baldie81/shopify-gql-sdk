@@ -102,7 +102,7 @@ final class Collections extends AbstractResource
 
         return $this->gql->execute($mutation, [
             'id'         => Gid::collection($id),
-            'productIds' => array_values(array_map(static fn (string $p): string => Gid::product($p), $productIds)),
+            'productIds' => array_values(array_map(static fn (int|string $p): string => Gid::product($p), $productIds)),
         ])['collectionAddProducts'] ?? ['collection' => null, 'userErrors' => []];
     }
 
@@ -119,7 +119,7 @@ final class Collections extends AbstractResource
 
         return $this->gql->execute($mutation, [
             'id'         => Gid::collection($id),
-            'productIds' => array_values(array_map(static fn (string $p): string => Gid::product($p), $productIds)),
+            'productIds' => array_values(array_map(static fn (int|string $p): string => Gid::product($p), $productIds)),
         ])['collectionRemoveProducts'] ?? ['job' => null, 'userErrors' => []];
     }
 
@@ -143,12 +143,12 @@ final class Collections extends AbstractResource
      *
      * @return list<array<string,mixed>>
      */
-    public function products(string $id, int $first = self::MAX_PAGE_SIZE): array
+    public function products(string $id, ?int $first = null): array
     {
-        $first = max(1, min($first, self::MAX_PAGE_SIZE));
-        $query = 'query ($id: ID!, $first: Int!) { collection(id: $id) { products(first: $first) { nodes { id title handle } } } }';
+        $query = 'query ($id: ID!, $first: Int!, $after: String) { collection(id: $id) { products(first: $first, after: $after) {'
+            . ' nodes { id title handle } pageInfo { hasNextPage endCursor } } } }';
 
-        return $this->gql->execute($query, ['id' => Gid::collection($id), 'first' => $first])['collection']['products']['nodes'] ?? [];
+        return $this->paginateNodes($query, ['id' => Gid::collection($id)], ['collection', 'products'], limit: $first);
     }
 
     /**

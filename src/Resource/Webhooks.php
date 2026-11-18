@@ -31,7 +31,7 @@ final class Webhooks extends AbstractResource
     public function list(int $first = 50, ?string $after = null): array
     {
         $first = max(1, min($first, self::MAX_PAGE_SIZE));
-        $data  = $this->gql->execute(self::listQuery(), ['first' => $first, 'after' => $after]);
+        $data  = $this->gql->execute($this->listQuery(), ['first' => $first, 'after' => $after]);
 
         return $data['webhookSubscriptions'] ?? ['nodes' => [], 'pageInfo' => ['hasNextPage' => false, 'endCursor' => null]];
     }
@@ -41,7 +41,7 @@ final class Webhooks extends AbstractResource
      */
     public function all(int $pageSize = self::MAX_PAGE_SIZE): array
     {
-        return $this->paginateNodes(self::listQuery(), [], 'webhookSubscriptions', $pageSize);
+        return $this->paginateNodes($this->listQuery(), [], 'webhookSubscriptions', $pageSize);
     }
 
     /**
@@ -49,7 +49,7 @@ final class Webhooks extends AbstractResource
      */
     public function get(string $id): ?array
     {
-        $query = 'query ($id: ID!) { webhookSubscription(id: $id) { ' . self::FIELDS . ' } }';
+        $query = 'query ($id: ID!) { webhookSubscription(id: $id) { ' . $this->fields() . ' } }';
 
         return $this->gql->execute($query, ['id' => Gid::webhookSubscription($id)])['webhookSubscription'] ?? null;
     }
@@ -65,7 +65,7 @@ final class Webhooks extends AbstractResource
     {
         $mutation = 'mutation ($topic: WebhookSubscriptionTopic!, $sub: WebhookSubscriptionInput!) {'
             . ' webhookSubscriptionCreate(topic: $topic, webhookSubscription: $sub) {'
-            . ' webhookSubscription { ' . self::FIELDS . ' } userErrors { field message } } }';
+            . ' webhookSubscription { ' . $this->fields() . ' } userErrors { field message } } }';
 
         $sub = $options;
         $sub[$this->endpointField()] = $uri;
@@ -92,7 +92,7 @@ final class Webhooks extends AbstractResource
 
         $mutation = 'mutation ($id: ID!, $sub: WebhookSubscriptionInput!) {'
             . ' webhookSubscriptionUpdate(id: $id, webhookSubscription: $sub) {'
-            . ' webhookSubscription { ' . self::FIELDS . ' } userErrors { field message } } }';
+            . ' webhookSubscription { ' . $this->fields() . ' } userErrors { field message } } }';
 
         return $this->gql->execute($mutation, ['id' => Gid::webhookSubscription($id), 'sub' => $input])['webhookSubscriptionUpdate'] ?? ['webhookSubscription' => null, 'userErrors' => []];
     }
@@ -116,10 +116,20 @@ final class Webhooks extends AbstractResource
         return $this->gql->apiVersionAtLeast('2025-10') ? 'uri' : 'callbackUrl';
     }
 
-    private static function listQuery(): string
+    /**
+     * The subscription selection. `uri` (2025-10+) is the current way to read
+     * the destination; the deprecated `endpoint` union is still selected so
+     * existing callers keep working until 2.0.
+     */
+    private function fields(): string
+    {
+        return self::FIELDS . ($this->gql->apiVersionAtLeast('2025-10') ? ' uri' : '');
+    }
+
+    private function listQuery(): string
     {
         return 'query ($first: Int!, $after: String) {'
             . ' webhookSubscriptions(first: $first, after: $after) {'
-            . ' nodes { ' . self::FIELDS . ' } pageInfo { hasNextPage endCursor } } }';
+            . ' nodes { ' . $this->fields() . ' } pageInfo { hasNextPage endCursor } } }';
     }
 }

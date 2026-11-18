@@ -9,7 +9,7 @@ use Baldie81\ShopifyGraphQL\Support\VariantInput;
 
 /**
  * Product variants — prices (`price`, `compareAtPrice`) and the variant-level
- * `inventoryItem` fields (sku, barcode, tracked, cost), via
+ * `inventoryItem` fields (sku, tracked, cost) plus `barcode`, via
  * `productVariantsBulkUpdate`. Variant *quantities* live in {@see Inventory}.
  *
  * The bulk mutations cap at {@see MAX_VARIANTS} variants per call; create/update/
@@ -30,13 +30,13 @@ final class Variants extends AbstractResource
      *
      * @return list<array<string,mixed>>
      */
-    public function list(string $productId, int $first = self::MAX_PAGE_SIZE, ?string $fields = null): array
+    public function list(string $productId, ?int $first = null, ?string $fields = null): array
     {
-        $first = max(1, min($first, self::MAX_PAGE_SIZE));
-        $query = 'query ($id: ID!, $first: Int!) {'
-            . ' product(id: $id) { variants(first: $first) { nodes { ' . ($fields ?? self::FIELDS) . ' } } } }';
+        $query = 'query ($id: ID!, $first: Int!, $after: String) {'
+            . ' product(id: $id) { variants(first: $first, after: $after) {'
+            . ' nodes { ' . ($fields ?? self::FIELDS) . ' } pageInfo { hasNextPage endCursor } } } }';
 
-        return $this->gql->execute($query, ['id' => Gid::product($productId), 'first' => $first])['product']['variants']['nodes'] ?? [];
+        return $this->paginateNodes($query, ['id' => Gid::product($productId)], ['product', 'variants'], limit: $first);
     }
 
     /**

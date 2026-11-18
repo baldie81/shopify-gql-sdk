@@ -1,0 +1,141 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
+to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.3.0] - 2026-11-18
+
+A correctness release from a full review of the package. No method was removed
+or renamed, but several calls now **fail loudly where they used to fail
+silently** — read "Behaviour changes" before upgrading.
+
+### Behaviour changes
+
+- **Auth and other non-2xx failures always throw.** Shopify reports them as
+  `{"errors": "…"}` — a string, not a list — which was skipped, so with a Guzzle
+  client that had `http_errors` off a 401 made `products()->get()` return `null`
+  ("not found"). Any non-empty `errors` member and any non-2xx status now raise
+  `GraphQLException`, whatever the injected client's `http_errors` setting.
+- **Invalid amounts throw `InvalidArgumentException`.** `'1,50'` used to be sent
+  as `1.00`. Numeric strings are now sent digit-for-digit (`'10.005'` is no
+  longer rounded to `10.01`, which broke three-decimal currencies).
+- **`bulkOperations()->poll()` throws `PollTimeoutException`** when the operation
+  is still running after the attempt budget, instead of returning the unfinished
+  operation as if it were the result. The default budget is now 300 polls
+  (10 minutes) instead of 60.
+- **`products()->deleteMedia()` and `syncMedia(prune: true)` detach media** from
+  the product rather than deleting the file (Shopify's replacement for the
+  deprecated `productDeleteMedia`). Pass `deleteFiles: true` to delete outright.
+- **List methods return every page.** `variants()->list()`,
+  `collections()->products()`, `priceLists()->prices()`,
+  `metafieldDefinitions()->all()`, `inventory()->locations()`,
+  `customers()->addresses()`, `products()->media()` and
+  `fulfillmentOrders()->forOrder()` used to stop silently at one page (250, or 50
+  for locations/addresses). `$first` is now an optional cap on the total.
+- **`products()->update()` no longer registers translations when the update
+  returned `userErrors`.**
+- **`Configuration` validates its input**: a shop that isn't a handle/hostname, or
+  a malformed API version, throws `InvalidArgumentException`.
+- `ShopifyClient::fromGuzzle()` rejects an `$apiVersion` that contradicts the
+  client's `base_uri`.
+- Requires `guzzlehttp/guzzle` `^7.15.2` (earlier 7.x releases have published
+  security advisories).
+
+### Fixed
+
+- HTTP 429 is retried (honouring `Retry-After`) instead of throwing on the first
+  attempt; a transient 502/503/504 is retried for queries. Mutations are never
+  re-sent after a gateway error, since the write may already have been applied.
+- `inventory()->setQuantities()` on 2026-04+ no longer reads the current
+  quantities first. It sends `changeFromQuantity: null` (Shopify's documented
+  opt-out), which removes a read-then-write race, an extra query, and a failure
+  for items stocked at more than 50 locations.
+- `products()->findIdBySku()` quotes and escapes the SKU, so SKUs containing
+  spaces, colons or quotes match exactly.
+- `syncMedia()` pairs newly created media with its slot by key instead of by list
+  position, so a partially failed create can't attach ids to the wrong slots.
+- `VariantInput::barcode()` sent the barcode inside `inventoryItem`, which has no
+  such field; it is now a variant-level field.
+- `VariantInput::make()` coerces a numeric id to a `ProductVariant` GID, like
+  every other id in the SDK.
+- `Configuration` built a broken endpoint for a shop pasted with a path
+  (`my-store.myshopify.com/admin`).
+- `orders()->fulfill()` considered only an order's first 50 fulfillment orders.
+- `ThrottledException::$errors` was always empty.
+- `bulkOperations()->results()` yielded `null` for a malformed JSONL line; it now
+  throws `TransportException`. `importMutation()` no longer writes an empty line
+  for a row that can't be JSON-encoded.
+- Collection and price-list id lists accept integer ids.
+
+### Changed
+
+- Deprecated Shopify APIs are no longer used on current versions:
+  `productCreateMedia` → `productUpdate(media:)`, `productDeleteMedia` →
+  `fileUpdate`, `currentBulkOperation` → `bulkOperations` (2026-01+),
+  `Customer.addresses` → `addressesV2` in `customers()->addresses()`.
+- `addMedia()` returns `userErrors` (with `mediaUserErrors` kept as an alias) and
+  reports only the media it created.
+- `Products` shares the client's `Files`/`Translations` instances, and the
+  staged-upload and bulk-download HTTP clients now honour `Configuration`'s
+  `verifySsl` and `connectTimeout`.
+- Throttle backoff is clamped to 10s (was 5s), enough to refill a full
+  single-query cost.
+- Minimum PHP lowered to 8.3; nothing in the package needs 8.4.
+
+### Added
+
+- **Schema-validation test**: every operation the SDK sends (document, variables,
+  deprecated fields) is validated against Shopify's real Admin GraphQL schema.
+  Run `composer schema` once to download it. This is how the `barcode` bug and
+  the deprecations above were found.
+- `Configuration::$maxRetries`; `ShopifyClient::fromGuzzle()` takes `$maxRetries`,
+  `$uploader` and `$downloader`, and reads the API version from the `base_uri`.
+- `VariantInput::new()` and `->optionValue()` for creating variants.
+- `Support\Money::decimal()`.
+- `files()->delete()`, `bulkOperations()->list()`.
+- `DraftOrderInput::customLineItem()` takes an optional currency (sent as
+  `originalUnitPriceWithCurrency`).
+- Customer selections include `defaultEmailAddress` / `defaultPhoneNumber`, and
+  webhook selections include `uri` (2025-10+), alongside the deprecated fields.
+- PHPStan (level 6), a GitHub Actions workflow (PHP 8.3–8.5), `composer check`,
+  and `.gitattributes` so tests/examples aren't shipped in dist archives.
+
+### Deprecated
+
+- `GiftCardInput::DEFAULT_CURRENCY` and the default `$currencyCode` argument: pass
+  the currency explicitly. It becomes required in 2.0.
+- Still selected or used for backward compatibility, to be removed in 2.0:
+  `email` / `phone` in the default customer selection, the webhook `endpoint`
+  selection, `collectionAddProducts` / `collectionRemoveProducts`, and
+  currency-less `customLineItem()` prices.
+
+### Known limitation
+
+- Media idempotency (`ensureMedia()`, `syncMedia()`) is still keyed on the media's
+  `alt` text. That key is visible as the image's alt text, and editing it in the
+  admin breaks the match. See the README for the trade-off and the workaround.
+
+### Removed
+
+- `examples_local/` and `.idea/` files that were tracked despite being ignored.
+
+## [1.2.0] - 2026-11-11
+
+- Gift cards send `initialAmount` (a `MoneyInput`); added `GiftCardInput::recipient()`.
+- Dropped the invalid `code` selection from `giftCardUpdate` userErrors.
+
+## [1.1.0] - 2026-11-09
+
+- Default to Shopify Admin API `2026-10`.
+
+## [1.0.0] - 2026-06-21
+
+- First stable release: products, variants, inventory, customers, orders,
+  collections, fulfillment orders, price lists, draft orders, gift cards,
+  webhooks, metafields and definitions, translations, files and bulk operations.
+
+[1.3.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/baldie81/shopify-gql-sdk/releases/tag/v1.0.0

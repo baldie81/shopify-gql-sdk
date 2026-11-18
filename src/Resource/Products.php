@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Baldie81\ShopifyGraphQL\Resource;
 
+use Baldie81\ShopifyGraphQL\GraphQL\Client;
 use Baldie81\ShopifyGraphQL\Support\Gid;
 use Baldie81\ShopifyGraphQL\Support\Media;
 use Baldie81\ShopifyGraphQL\Support\MediaEntry;
@@ -42,6 +43,19 @@ final class Products extends AbstractResource
         createdAt
         updatedAt
         GQL;
+
+    private const string MEDIA_FIELDS = 'id alt mediaContentType status';
+
+    private readonly Files $files;
+
+    private readonly Translations $translations;
+
+    public function __construct(Client $gql, ?Files $files = null, ?Translations $translations = null)
+    {
+        parent::__construct($gql);
+        $this->files        = $files ?? new Files($gql);
+        $this->translations = $translations ?? new Translations($gql);
+    }
 
     /**
      * Fetch a single product by id (numeric id or a GID). Returns the product
@@ -181,9 +195,15 @@ final class Products extends AbstractResource
             return $result;
         }
 
+        // Nothing was saved (userErrors), so there's nothing to translate —
+        // registering against the unchanged product would be a half-applied write.
+        if (($result['userErrors'] ?? []) !== []) {
+            return $result;
+        }
+
         $productId = $result['product']['id'] ?? $fallbackId;
         if ($productId === null) {
-            return $result; // nothing saved to translate (e.g. userErrors)
+            return $result;
         }
 
         $result['translations'] = $this->setTranslations((string) $productId, $fields);
@@ -206,42 +226,75 @@ final class Products extends AbstractResource
     }
 
     /**
-     * List a product's existing media nodes (`id`, `alt`, `mediaContentType`,
-     * `status`).
+     * List a product's media nodes (`id`, `alt`, `mediaContentType`, `status`),
+     * in position order. Walks every page; pass `$first` to cap the count.
      *
      * @return list<array<string,mixed>>
      */
-    public function media(string $id, int $first = self::MAX_PAGE_SIZE): array
+    public function media(string $id, ?int $first = null): array
     {
-        $first = max(1, min($first, self::MAX_PAGE_SIZE));
-        $query = 'query ($id: ID!, $first: Int!) {'
-            . ' product(id: $id) { media(first: $first) { nodes { id alt mediaContentType status } } } }';
+        $query = 'query ($id: ID!, $first: Int!, $after: String) {'
+            . ' product(id: $id) { media(first: $first, after: $after) {'
+            . ' nodes { ' . self::MEDIA_FIELDS . ' } pageInfo { hasNextPage endCursor } } } }';
 
-        $data = $this->gql->execute($query, ['id' => Gid::product($id), 'first' => $first]);
-
-        return $data['product']['media']['nodes'] ?? [];
+        return $this->paginateNodes($query, ['id' => Gid::product($id)], ['product', 'media'], limit: $first);
     }
 
     /**
-     * Attach media to a product (raw `productCreateMedia`). NOT idempotent —
-     * Shopify does not dedupe by source, so repeated calls create duplicate
-     * files. Use {@see ensureMedia()} for idempotent assignment.
+     * Attach media to a product. NOT idempotent — Shopify does not dedupe by
+     * source, so repeated calls create duplicate files. Use {@see ensureMedia()}
+     * for idempotent assignment.
+     *
+     * Sent as `productUpdate(media: …)` (`productCreateMedia` is deprecated).
+     * Returns the newly created media nodes; `mediaUserErrors` is kept as an
+     * alias of `userErrors` for backward compatibility.
      *
      * @param list<Media|array<string,mixed>> $media
-     * @return array{media:list<array<string,mixed>>,mediaUserErrors:list<array<string,mixed>>}
+     * @return array{media:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,mediaUserErrors:list<array<string,mixed>>}
      */
     public function addMedia(string $id, array $media): array
     {
-        $mutation = 'mutation ($productId: ID!, $media: [CreateMediaInput!]!) {'
-            . ' productCreateMedia(productId: $productId, media: $media) {'
-            . ' media { id alt mediaContentType status } mediaUserErrors { field message code } } }';
+        $inputs = $this->payloads($media);
+        if ($inputs === []) {
+            return ['media' => [], 'userErrors' => [], 'mediaUserErrors' => []];
+        }
 
-        $data = $this->gql->execute($mutation, [
-            'productId' => Gid::product($id),
-            'media'     => $this->payloads($media),
-        ]);
+        return $this->createMedia(Gid::product($id), $inputs, array_column($this->media($id), 'id'));
+    }
 
-        return $data['productCreateMedia'] ?? ['media' => [], 'mediaUserErrors' => []];
+    /**
+     * Create media via `productUpdate` and work out which nodes are new: the
+     * payload returns the product's media (newest first), and anything whose id
+     * wasn't in `$knownIds` was created by this call.
+     *
+     * @param list<array<string,mixed>> $inputs   CreateMediaInput payloads
+     * @param list<string>              $knownIds media ids on the product before the call
+     * @return array{media:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,mediaUserErrors:list<array<string,mixed>>}
+     */
+    private function createMedia(string $gid, array $inputs, array $knownIds): array
+    {
+        $mutation = 'mutation ($product: ProductUpdateInput!, $media: [CreateMediaInput!], $first: Int!) {'
+            . ' productUpdate(product: $product, media: $media) {'
+            . ' product { id media(first: $first, sortKey: ID, reverse: true) { nodes { ' . self::MEDIA_FIELDS . ' } } }'
+            . ' userErrors { field message } } }';
+
+        $result = $this->gql->execute($mutation, [
+            'product' => ['id' => $gid],
+            'media'   => $inputs,
+            'first'   => min(count($inputs), self::MAX_PAGE_SIZE),
+        ])['productUpdate'] ?? [];
+
+        $known   = array_flip($knownIds);
+        $created = [];
+        foreach ($result['product']['media']['nodes'] ?? [] as $node) {
+            if (isset($node['id']) && !isset($known[$node['id']])) {
+                $created[] = $node;
+            }
+        }
+        $created    = array_reverse($created); // newest-first -> creation (input) order
+        $userErrors = $result['userErrors'] ?? [];
+
+        return ['media' => $created, 'userErrors' => $userErrors, 'mediaUserErrors' => $userErrors];
     }
 
     /**
@@ -256,7 +309,11 @@ final class Products extends AbstractResource
     public function ensureMedia(string $id, array $media): array
     {
         $existing = [];
+        $knownIds = [];
         foreach ($this->media($id) as $node) {
+            if (isset($node['id'])) {
+                $knownIds[] = (string) $node['id'];
+            }
             $alt = $node['alt'] ?? null;
             if (is_string($alt) && $alt !== '') {
                 $existing[$alt] = true;
@@ -280,9 +337,9 @@ final class Products extends AbstractResource
 
         $result = ['added' => [], 'skipped' => $skipped, 'mediaUserErrors' => []];
         if ($toAdd !== []) {
-            $created                   = $this->addMedia($id, $toAdd);
-            $result['added']           = $created['media'] ?? [];
-            $result['mediaUserErrors'] = $created['mediaUserErrors'] ?? [];
+            $created                   = $this->createMedia(Gid::product($id), $toAdd, $knownIds);
+            $result['added']           = $created['media'];
+            $result['mediaUserErrors'] = $created['userErrors'];
         }
 
         return $result;
@@ -307,7 +364,7 @@ final class Products extends AbstractResource
     public function setTranslations(string $id, array $fields, ?string $marketId = null): array
     {
         $gid          = Gid::product($id);
-        $translations = new Translations($this->gql);
+        $translations = $this->translations;
         $digests      = $translations->digests($gid);
 
         $inputs  = [];
@@ -348,15 +405,17 @@ final class Products extends AbstractResource
     public function findIdBySku(string $sku): ?string
     {
         $query = 'query ($q: String!) { productVariants(first: 1, query: $q) { nodes { product { id } } } }';
-        $data  = $this->gql->execute($query, ['q' => 'sku:' . $sku]);
+        // Quoted, so SKUs containing spaces, colons or quotes match exactly
+        // instead of being parsed as search syntax.
+        $data  = $this->gql->execute($query, ['q' => 'sku:"' . addcslashes($sku, '"\\') . '"']);
 
         return $data['productVariants']['nodes'][0]['product']['id'] ?? null;
     }
 
     /**
      * Reorder a product's media to match the given id order (index 0 = first /
-     * main image). `newPosition` is sent as a zero-based string, working around a
-     * known Shopify quirk.
+     * main image). `newPosition` is zero-based and sent as a string, as its
+     * `UnsignedInt64` type requires.
      *
      * @param list<string> $orderedMediaIds
      * @return array{job:?array<string,mixed>,mediaUserErrors:list<array<string,mixed>>}
@@ -378,25 +437,38 @@ final class Products extends AbstractResource
     }
 
     /**
-     * Detach media from a product (`productDeleteMedia`). Returns the deleted
-     * media ids and any errors.
+     * Remove media from a product. By default the media is *detached*
+     * (`fileUpdate` with `referencesToRemove`; `productDeleteMedia` is
+     * deprecated): the file stays in the store's Files library and on any other
+     * product that uses it. Pass `$deleteFiles: true` to delete the files
+     * outright (`fileDelete`), which removes them everywhere.
      *
      * @param list<string> $mediaIds
      * @return array{deletedMediaIds:list<string>,mediaUserErrors:list<array<string,mixed>>}
      */
-    public function deleteMedia(string $id, array $mediaIds): array
+    public function deleteMedia(string $id, array $mediaIds, bool $deleteFiles = false): array
     {
+        $mediaIds = array_values($mediaIds);
         if ($mediaIds === []) {
             return ['deletedMediaIds' => [], 'mediaUserErrors' => []];
         }
 
-        $mutation = 'mutation ($productId: ID!, $mediaIds: [ID!]!) {'
-            . ' productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {'
-            . ' deletedMediaIds deletedProductImageIds mediaUserErrors { field message code } } }';
+        if ($deleteFiles) {
+            $deleted = $this->files->delete($mediaIds);
 
-        $data = $this->gql->execute($mutation, ['productId' => Gid::product($id), 'mediaIds' => array_values($mediaIds)]);
+            return ['deletedMediaIds' => $deleted['deletedFileIds'], 'mediaUserErrors' => $deleted['userErrors']];
+        }
 
-        return $data['productDeleteMedia'] ?? ['deletedMediaIds' => [], 'mediaUserErrors' => []];
+        $gid     = Gid::product($id);
+        $updated = $this->files->update(array_map(
+            static fn (string $mediaId): array => ['id' => $mediaId, 'referencesToRemove' => [$gid]],
+            $mediaIds,
+        ));
+
+        return [
+            'deletedMediaIds' => array_values(array_column($updated['files'] ?? [], 'id')),
+            'mediaUserErrors' => $updated['userErrors'] ?? [],
+        ];
     }
 
     /**
@@ -420,10 +492,14 @@ final class Products extends AbstractResource
     public function syncMedia(string $id, array $slots, bool $prune = false): array
     {
         $gid   = Gid::product($id);
-        $files = new Files($this->gql);
+        $files = $this->files;
 
         $existing = [];
+        $knownIds = [];
         foreach ($this->media($gid) as $node) {
+            if (isset($node['id'])) {
+                $knownIds[] = (string) $node['id'];
+            }
             $alt = $node['alt'] ?? null;
             if (is_string($alt) && $alt !== '' && isset($node['id'])) {
                 $existing[$alt] = (string) $node['id'];
@@ -475,16 +551,23 @@ final class Products extends AbstractResource
 
         $created = [];
         if ($createInputs !== []) {
-            $result       = $this->addMedia($gid, $createInputs);
-            $createdMedia = $result['media'] ?? [];
-            foreach ($result['mediaUserErrors'] ?? [] as $error) {
+            $result = $this->createMedia($gid, $createInputs, $knownIds);
+            foreach ($result['userErrors'] as $error) {
                 $userErrors[] = $error;
             }
-            // productCreateMedia returns media in input order.
-            foreach ($createKeys as $index => $key) {
-                $newId = $createdMedia[$index]['id'] ?? null;
-                if ($newId !== null) {
-                    $existing[$key] = (string) $newId;
+            // Pair each new media with its slot by key (the `alt` we sent), not by
+            // list position — a partial failure would otherwise shift every id
+            // onto the wrong slot.
+            $idByKey = [];
+            foreach ($result['media'] as $node) {
+                $alt = $node['alt'] ?? null;
+                if (is_string($alt) && isset($node['id']) && !isset($idByKey[$alt])) {
+                    $idByKey[$alt] = (string) $node['id'];
+                }
+            }
+            foreach ($createKeys as $key) {
+                if (isset($idByKey[$key])) {
+                    $existing[$key] = $idByKey[$key];
                     $created[]      = $key;
                     $action[$key]   = 'created';
                 }
