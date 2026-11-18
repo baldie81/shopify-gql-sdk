@@ -4,12 +4,23 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly, so a field Shopify deprecates or removes — or a new security
+  # advisory in a dependency — is noticed even when nothing was pushed.
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  # Make the schema-validation test fail instead of skip when the schema is
+  # missing, so a green build always means the queries were checked.
+  SHOPIFY_SCHEMA_REQUIRED: '1'
+
 jobs:
   tests:
+    name: tests (${{ matrix.php }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -23,16 +34,40 @@ jobs:
           php-version: ${{ matrix.php }}
           coverage: none
 
+      - name: Validate composer.json
+        run: composer validate --strict
+
       - run: composer install --no-interaction --no-progress
+
+      - name: Security advisories
+        run: composer audit --abandoned=report
 
       - name: Static analysis
         run: composer stan
 
-      # Lets the schema-validation test run; if Shopify's endpoint is
-      # unreachable that one test is skipped rather than failing the build.
       - name: Download Shopify schema
         run: composer schema
-        continue-on-error: true
+
+      - name: Tests
+        run: composer test
+
+  # The package must work on the oldest versions composer.json allows, not just
+  # the newest ones a fresh install happens to pick.
+  lowest-dependencies:
+    name: tests (8.3, lowest dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - run: composer update --prefer-lowest --prefer-stable --no-interaction --no-progress
+
+      - name: Download Shopify schema
+        run: composer schema
 
       - name: Tests
         run: composer test

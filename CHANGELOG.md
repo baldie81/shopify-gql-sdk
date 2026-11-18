@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Internal
+
+- CI: weekly scheduled run (catches Shopify schema changes and new dependency
+  advisories), `composer validate --strict`, `composer audit`, and a job that
+  runs the tests on the lowest allowed dependency versions.
+- CI fails, instead of silently skipping the schema-validation test, when the
+  Shopify schema can't be downloaded.
+
 ## [1.4.1] - 2026-11-18
 
 ### Documentation
@@ -206,6 +216,7 @@ silently** — read "Behaviour changes" before upgrading.
   collections, fulfillment orders, price lists, draft orders, gift cards,
   webhooks, metafields and definitions, translations, files and bulk operations.
 
+[Unreleased]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.4.1...HEAD
 [1.4.1]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.2.0...v1.3.0

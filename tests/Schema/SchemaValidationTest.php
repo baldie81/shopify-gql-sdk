@@ -51,7 +51,8 @@ use Psr\Http\Message\RequestInterface;
  * recording transport and checks what was sent.
  *
  * The schema isn't committed (it is several MB and Shopify's). Fetch it with
- * `composer schema`; without it the test is skipped.
+ * `composer schema`; without it the test is skipped (or fails, when the
+ * SHOPIFY_SCHEMA_REQUIRED environment variable is set, as it is in CI).
  */
 final class SchemaValidationTest extends TestCase
 {
@@ -85,6 +86,10 @@ final class SchemaValidationTest extends TestCase
     {
         $schema = self::schema();
         if ($schema === null) {
+            // CI sets this so a missing schema can't pass as a green build.
+            if (getenv('SHOPIFY_SCHEMA_REQUIRED')) {
+                self::fail('Schema not found, and SHOPIFY_SCHEMA_REQUIRED is set. Run `composer schema`.');
+            }
             self::markTestSkipped('Schema not found. Run `composer schema` to download it.');
         }
 
