@@ -207,7 +207,15 @@ database instead.
    next sync on rule 1 applies. Adopted keys are listed in the result (`adopted`).
 
 **Alt text.** Pass `alt:` for a real description. Without it, a new image gets its
-key as alt text and a replaced image keeps the alt text it already has.
+key as alt text and a replaced image keeps the alt text it already has. An `alt:`
+you pass is applied on every sync, so changing it in your code updates the image.
+
+> **With `Media`, pass `key:` whenever you pass a descriptive `alt:`.**
+> `Media::image($url, alt: 'Red tee, front')` has no key of its own, so the alt
+> text is used as the key (as in earlier versions). Rewording the description
+> later changes the key, and `ensureMedia()` adds the image again. Write
+> `Media::image($url, alt: 'Red tee, front', key: 'front')` instead.
+> `MediaEntry` is not affected: its key is always the filename or the `key:` you give.
 
 **Things to know**
 
@@ -215,7 +223,10 @@ key as alt text and a replaced image keeps the alt text it already has.
   product is later duplicated in the admin or the store is migrated, the copy's
   first sync can't recognise its images and adds them again. A second store that
   isn't copied with the product (the JSON file, or your database) doesn't help
-  here either, because the copy has a new product id.
+  here either, because the copy has a new product id. With `prune: true` the
+  unrecognised originals are removed in that same sync, so the product still ends
+  up with one of each; without it you get duplicates. Leaving `alt:` unset avoids
+  the problem entirely.
 - If the map can't be saved after media was changed, the call still returns, with
   `keyStoreSaved: false` and the reason in `userErrors`. Sync again to repair it.
 - If no store can be read at all, the call throws `MediaKeyStoreException` before

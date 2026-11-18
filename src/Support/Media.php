@@ -18,6 +18,9 @@ use Baldie81\ShopifyGraphQL\Enum\MediaContentType;
  * `key`; if only `alt` is given it doubles as the key (as in earlier versions),
  * and if neither is given both are the filename.
  *
+ * Always give a `key` alongside a descriptive `alt`: when the alt text is the
+ * key, rewording it later changes the key and the media is added again.
+ *
  *   Media::image('https://cdn.example.com/front.jpg');                                  // key & alt: front.jpg
  *   Media::image('https://cdn.example.com/front.jpg', alt: 'Red tee, front', key: 'front');
  *   Media::make('https://youtu.be/x', MediaContentType::ExternalVideo, key: 'promo');
