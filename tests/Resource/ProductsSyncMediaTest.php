@@ -12,7 +12,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 {
     public function testFindIdBySku(): void
     {
-        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+        $client = $this->altOnlyClient([new Response(200, [], (string) json_encode([
             'data' => ['productVariants' => ['nodes' => [['product' => ['id' => 'gid://shopify/Product/55']]]]],
         ]))]);
 
@@ -22,7 +22,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
     public function testFindIdBySkuQuotesAndEscapesTheSku(): void
     {
-        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+        $client = $this->altOnlyClient([new Response(200, [], (string) json_encode([
             'data' => ['productVariants' => ['nodes' => []]],
         ]))]);
 
@@ -33,7 +33,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
     public function testFindIdBySkuReturnsNullWhenNoMatch(): void
     {
-        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+        $client = $this->altOnlyClient([new Response(200, [], (string) json_encode([
             'data' => ['productVariants' => ['nodes' => []]],
         ]))]);
 
@@ -42,7 +42,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
     public function testReorderMediaSendsZeroBasedStringPositions(): void
     {
-        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+        $client = $this->altOnlyClient([new Response(200, [], (string) json_encode([
             'data' => ['productReorderMedia' => ['job' => ['id' => 'gid://shopify/Job/1', 'done' => false], 'mediaUserErrors' => []]],
         ]))]);
 
@@ -61,7 +61,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
     public function testSyncMediaReplacesExistingCreatesNewThenReorders(): void
     {
-        $client = $this->mockClient([
+        $client = $this->altOnlyClient([
             // 1. existing media on the product (slot 1 already present, keyed by alt)
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
                 ['id' => 'gid://shopify/MediaImage/1', 'alt' => 'ACME_1.jpg', 'mediaContentType' => 'IMAGE'],
@@ -115,7 +115,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
     public function testSyncMediaBatchesCreatesIntoOneCall(): void
     {
-        $client = $this->mockClient([
+        $client = $this->altOnlyClient([
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => []]]]])),
             // ONE productUpdate for both new slots (media comes back newest first)
             new Response(200, [], (string) json_encode(['data' => ['productUpdate' => [
@@ -143,7 +143,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
     public function testSyncMediaSingleSlotSkipsReorder(): void
     {
-        $client = $this->mockClient([
+        $client = $this->altOnlyClient([
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => []]]]])),
             new Response(200, [], (string) json_encode(['data' => ['productUpdate' => [
                 'product'    => ['id' => 'gid://shopify/Product/55', 'media' => ['nodes' => [['id' => 'gid://shopify/MediaImage/9', 'alt' => 'solo.jpg']]]],
@@ -159,7 +159,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
     public function testDeleteMedia(): void
     {
-        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+        $client = $this->altOnlyClient([new Response(200, [], (string) json_encode([
             'data' => ['fileUpdate' => ['files' => [['id' => 'gid://shopify/MediaImage/1']], 'userErrors' => []]],
         ]))]);
 
@@ -179,7 +179,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
     public function testDeleteMediaCanDeleteTheFilesOutright(): void
     {
-        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+        $client = $this->altOnlyClient([new Response(200, [], (string) json_encode([
             'data' => ['fileDelete' => ['deletedFileIds' => ['gid://shopify/MediaImage/1'], 'userErrors' => []]],
         ]))]);
 
@@ -191,7 +191,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
     public function testSyncMediaPairsCreatedMediaByKeyNotPosition(): void
     {
-        $client = $this->mockClient([
+        $client = $this->altOnlyClient([
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => []]]]])),
             // A_1 failed to create: only A_2 comes back, alongside a userError
             new Response(200, [], (string) json_encode(['data' => ['productUpdate' => [
@@ -215,7 +215,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
     public function testSyncMediaPruneDeletesOrphanedMedia(): void
     {
-        $client = $this->mockClient([
+        $client = $this->altOnlyClient([
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
                 ['id' => 'gid://shopify/MediaImage/OLD', 'alt' => 'image_1.jpg'],   // orphan (renamed away)
                 ['id' => 'gid://shopify/MediaImage/KEEP', 'alt' => 'SDK_1.jpg'],     // matches incoming
@@ -241,7 +241,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
     public function testSyncMediaWithoutPruneLeavesOrphans(): void
     {
-        $client = $this->mockClient([
+        $client = $this->altOnlyClient([
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
                 ['id' => 'gid://shopify/MediaImage/OLD', 'alt' => 'image_1.jpg'],
                 ['id' => 'gid://shopify/MediaImage/KEEP', 'alt' => 'SDK_1.jpg'],

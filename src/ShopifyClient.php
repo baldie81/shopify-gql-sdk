@@ -7,6 +7,7 @@ namespace Baldie81\ShopifyGraphQL;
 use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\ClientInterface;
 use Baldie81\ShopifyGraphQL\GraphQL\Client as GraphQLClient;
+use Baldie81\ShopifyGraphQL\MediaKeys\MediaKeyStore;
 use Baldie81\ShopifyGraphQL\Resource\BulkOperations;
 use Baldie81\ShopifyGraphQL\Resource\Collections;
 use Baldie81\ShopifyGraphQL\Resource\Customers;
@@ -52,6 +53,7 @@ final class ShopifyClient
     private ?DraftOrders $draftOrders = null;
     private ?GiftCards $giftCards = null;
     private ?Webhooks $webhooks = null;
+    private ?MediaKeyStore $mediaKeyStore = null;
 
     /**
      * @param ClientInterface|null $uploader   plain client (no Shopify auth) for pushing
@@ -134,6 +136,23 @@ final class ShopifyClient
         return preg_match('#/admin/api/([^/]+)/?#', $baseUri, $m) === 1 ? $m[1] : null;
     }
 
+    /**
+     * Choose where product media key maps are kept (see {@see MediaKeyStore}).
+     * Without this, they live in a metafield on each product. Returns `$this`.
+     *
+     *   $shopify->useMediaKeyStore(new ChainMediaKeyStore(
+     *       new MetafieldMediaKeyStore($shopify->graphql()),
+     *       new JsonFileMediaKeyStore($dir),
+     *   ));
+     */
+    public function useMediaKeyStore(MediaKeyStore $store): self
+    {
+        $this->mediaKeyStore = $store;
+        $this->products      = null; // rebuilt with the new store on next use
+
+        return $this;
+    }
+
     public function graphql(): GraphQLClient
     {
         return $this->gql;
@@ -141,7 +160,7 @@ final class ShopifyClient
 
     public function products(): Products
     {
-        return $this->products ??= new Products($this->gql, $this->files(), $this->translations());
+        return $this->products ??= new Products($this->gql, $this->files(), $this->translations(), $this->mediaKeyStore);
     }
 
     public function bulkOperations(): BulkOperations

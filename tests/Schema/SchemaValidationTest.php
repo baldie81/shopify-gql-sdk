@@ -299,8 +299,14 @@ final class SchemaValidationTest extends TestCase
         $p->deleteMedia($pid, ['gid://shopify/MediaImage/1'], deleteFiles: true);
         $p->syncMedia($pid, [
             MediaEntry::url(1, 'https://cdn.test/KEEP_1.jpg'),
-            MediaEntry::url(2, 'https://cdn.test/NEW_2.jpg'),
+            MediaEntry::url(2, 'https://cdn.test/NEW_2.jpg', alt: 'A real description'),
         ], prune: true);
+
+        // Media key store (the map read happens inside the media syncs above)
+        $keys = new \Baldie81\ShopifyGraphQL\MediaKeys\MetafieldMediaKeyStore($c->graphql());
+        $keys->load('gid://shopify/Product/1');
+        $keys->save('gid://shopify/Product/1', ['KEEP_1.jpg' => 'gid://shopify/MediaImage/1']);
+        $keys->forget('gid://shopify/Product/1');
 
         // Variants
         $v = $c->variants();

@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 namespace Baldie81\ShopifyGraphQL\Resource;
 
+use Baldie81\ShopifyGraphQL\Exception\MediaKeyStoreException;
 use Baldie81\ShopifyGraphQL\GraphQL\Client;
+use Baldie81\ShopifyGraphQL\MediaKeys\ChainMediaKeyStore;
+use Baldie81\ShopifyGraphQL\MediaKeys\MediaKeyStore;
+use Baldie81\ShopifyGraphQL\MediaKeys\MetafieldMediaKeyStore;
+use Baldie81\ShopifyGraphQL\Support\Arrayable;
 use Baldie81\ShopifyGraphQL\Support\Gid;
 use Baldie81\ShopifyGraphQL\Support\Media;
 use Baldie81\ShopifyGraphQL\Support\MediaEntry;
@@ -50,11 +55,19 @@ final class Products extends AbstractResource
 
     private readonly Translations $translations;
 
-    public function __construct(Client $gql, ?Files $files = null, ?Translations $translations = null)
+    private readonly MediaKeyStore $mediaKeys;
+
+    /**
+     * @param MediaKeyStore|null $mediaKeys where the `key => media id` maps used by
+     *                                      {@see syncMedia()} / {@see ensureMedia()} are
+     *                                      kept; defaults to a metafield on the product
+     */
+    public function __construct(Client $gql, ?Files $files = null, ?Translations $translations = null, ?MediaKeyStore $mediaKeys = null)
     {
         parent::__construct($gql);
         $this->files        = $files ?? new Files($gql);
         $this->translations = $translations ?? new Translations($gql);
+        $this->mediaKeys    = $mediaKeys ?? new MetafieldMediaKeyStore($gql);
     }
 
     /**
@@ -298,51 +311,275 @@ final class Products extends AbstractResource
     }
 
     /**
-     * Idempotently assign media to a product: fetch the product's existing media,
-     * skip any whose key (the `alt`) is already present, and create only the rest
-     * — so re-running never adds the same file twice. The requested batch is also
-     * de-duped by key. Media without a key can't be deduped and is always added.
+     * Idempotently assign media to a product: skip any whose key is already on
+     * the product and create only the rest — so re-running never adds the same
+     * file twice. The requested batch is also de-duped by key. Media without a
+     * key can't be deduped and is always added.
      *
-     * @param list<Media|array<string,mixed>> $media
-     * @return array{added:list<array<string,mixed>>,skipped:list<string>,mediaUserErrors:list<array<string,mixed>>}
+     * Existing media is recognised through the {@see MediaKeyStore} (see
+     * {@see syncMedia()} for how keys are matched).
+     *
+     * @param list<Media|Arrayable|array<string,mixed>> $media
+     * @return array{added:list<array<string,mixed>>,skipped:list<string>,mediaUserErrors:list<array<string,mixed>>,keyStoreSaved:bool}
      */
     public function ensureMedia(string $id, array $media): array
     {
-        $existing = [];
-        $knownIds = [];
-        foreach ($this->media($id) as $node) {
-            if (isset($node['id'])) {
-                $knownIds[] = (string) $node['id'];
-            }
-            $alt = $node['alt'] ?? null;
-            if (is_string($alt) && $alt !== '') {
-                $existing[$alt] = true;
-            }
-        }
+        $gid   = Gid::product($id);
+        $state = $this->resolveMediaKeys($gid);
+        $known = $state['known'];
 
         $toAdd   = [];
+        $addKeys = [];
         $skipped = [];
         $seen    = [];
-        foreach ($this->payloads($media) as $payload) {
-            $key = (string) ($payload['alt'] ?? '');
-            if ($key !== '' && (isset($existing[$key]) || isset($seen[$key]))) {
+        foreach ($media as $item) {
+            if ($item instanceof Media) {
+                $key     = $item->key();
+                $payload = $item->toArray();
+            } else {
+                $payload = $this->payload($item);
+                // A raw array may name its key explicitly; it is not part of CreateMediaInput.
+                $key = (string) ($payload['key'] ?? $payload['alt'] ?? '');
+                unset($payload['key']);
+            }
+
+            if ($key !== '' && (isset($known[$key]) || isset($seen[$key]))) {
                 $skipped[] = $key;
                 continue;
             }
             if ($key !== '') {
                 $seen[$key] = true;
             }
-            $toAdd[] = $payload;
+            $toAdd[]   = $payload;
+            $addKeys[] = $key;
         }
 
-        $result = ['added' => [], 'skipped' => $skipped, 'mediaUserErrors' => []];
+        $result = ['added' => [], 'skipped' => $skipped, 'mediaUserErrors' => [], 'keyStoreSaved' => true];
         if ($toAdd !== []) {
-            $created                   = $this->createMedia(Gid::product($id), $toAdd, $knownIds);
+            $created                   = $this->createMedia($gid, $toAdd, $state['ids']);
             $result['added']           = $created['media'];
             $result['mediaUserErrors'] = $created['userErrors'];
+
+            foreach (self::pairCreated($toAdd, $created['media']) as $index => $mediaId) {
+                if ($addKeys[$index] !== '') {
+                    $known[$addKeys[$index]] = $mediaId;
+                }
+            }
+        }
+
+        $error = $this->saveMediaKeys($gid, $known, $state['loaded']);
+        if ($error !== null) {
+            $result['keyStoreSaved']     = false;
+            $result['mediaUserErrors'][] = $error;
         }
 
         return $result;
+    }
+
+    /**
+     * Work out which key belongs to which media currently on the product.
+     *
+     * The stored key maps are the rule: a key maps to the media id recorded for
+     * it, provided that media is still on the product (with several stores, the
+     * first one holding a still-valid id for a key wins). Alt text is ignored.
+     *
+     * Only when no stored entry is usable at all — a product synced before key
+     * maps existed, or a duplicated/migrated product whose stored ids belong to
+     * another product — is the media *adopted* by alt text, once: every media
+     * with a non-empty alt becomes `alt => id`. Saving the result afterwards
+     * means the next sync is back to matching by id.
+     *
+     * @return array{ids:list<string>,known:array<string,string>,adopted:list<string>,loaded:list<array<string,string>|null>}
+     * @throws MediaKeyStoreException when none of the stores can be read
+     */
+    private function resolveMediaKeys(string $gid): array
+    {
+        $stores = $this->keyStores();
+
+        // The metafield store's map can be read in the media query itself.
+        $inline = null;
+        foreach ($stores as $store) {
+            if ($store instanceof MetafieldMediaKeyStore) {
+                $inline = $store;
+                break;
+            }
+        }
+
+        [$nodes, $product] = $this->readMedia($gid, $inline);
+
+        $loaded   = [];
+        $failures = [];
+        foreach ($stores as $store) {
+            try {
+                $loaded[] = $store === $inline ? $inline->parse($product) : $store->load($gid);
+            } catch (MediaKeyStoreException $e) {
+                $loaded[]   = null;
+                $failures[] = $e->getMessage();
+            }
+        }
+        // One unreadable store is covered by the others; with none readable we
+        // can't tell what's already there, so stop before changing anything.
+        if ($failures !== [] && count($failures) === count($stores)) {
+            throw new MediaKeyStoreException(implode(' | ', $failures));
+        }
+
+        $ids = [];
+        foreach ($nodes as $node) {
+            if (isset($node['id'])) {
+                $ids[] = (string) $node['id'];
+            }
+        }
+        $onProduct = array_flip($ids);
+
+        $known = [];
+        foreach ($loaded as $map) {
+            foreach ($map ?? [] as $key => $mediaId) {
+                if (isset($onProduct[$mediaId]) && !isset($known[$key])) {
+                    $known[(string) $key] = $mediaId;
+                }
+            }
+        }
+
+        $adopted = [];
+        if ($known === []) {
+            foreach ($nodes as $node) {
+                $alt = $node['alt'] ?? null;
+                if (is_string($alt) && $alt !== '' && isset($node['id']) && !isset($known[$alt])) {
+                    $known[$alt] = (string) $node['id'];
+                    $adopted[]   = $alt;
+                }
+            }
+        }
+
+        return ['ids' => $ids, 'known' => $known, 'adopted' => $adopted, 'loaded' => $loaded];
+    }
+
+    /**
+     * Persist the key map to every store whose copy differs. Returns null on
+     * success, or a userError-shaped entry describing the failure — the media
+     * itself has already been changed by then, so this is reported, not thrown.
+     *
+     * @param array<string,string>             $map
+     * @param list<array<string,string>|null>  $loaded what each store returned when read
+     * @return array{field:null,message:string,code:string}|null
+     */
+    private function saveMediaKeys(string $gid, array $map, array $loaded): ?array
+    {
+        ksort($map);
+
+        $failures = [];
+        foreach ($this->keyStores() as $index => $store) {
+            $current = $loaded[$index] ?? null;
+            if ($current !== null) {
+                ksort($current);
+                if ($current === $map) {
+                    continue; // already up to date: no write
+                }
+            }
+
+            try {
+                $store->save($gid, $map);
+            } catch (MediaKeyStoreException $e) {
+                $failures[] = $e->getMessage();
+            }
+        }
+
+        return $failures === []
+            ? null
+            : ['field' => null, 'message' => implode(' | ', $failures), 'code' => 'MEDIA_KEY_STORE_FAILED'];
+    }
+
+    /**
+     * @return list<MediaKeyStore>
+     */
+    private function keyStores(): array
+    {
+        return $this->mediaKeys instanceof ChainMediaKeyStore ? $this->mediaKeys->stores() : [$this->mediaKeys];
+    }
+
+    /**
+     * Every media node on the product plus, when `$inline` is given, the product
+     * node carrying that store's map — read in the same request.
+     *
+     * @return array{0:list<array<string,mixed>>,1:array<string,mixed>|null}
+     */
+    private function readMedia(string $gid, ?MetafieldMediaKeyStore $inline): array
+    {
+        $query = 'query ($id: ID!, $first: Int!, $after: String) {'
+            . ' product(id: $id) { ' . ($inline !== null ? $inline->selection() . ' ' : '')
+            . 'media(first: $first, after: $after) {'
+            . ' nodes { ' . self::MEDIA_FIELDS . ' } pageInfo { hasNextPage endCursor } } } }';
+
+        $nodes   = [];
+        $product = null;
+        $after   = null;
+
+        do {
+            $page = $this->gql->execute($query, ['id' => $gid, 'first' => self::MAX_PAGE_SIZE, 'after' => $after])['product'] ?? null;
+            if (!is_array($page)) {
+                break;
+            }
+            $product ??= $page;
+
+            foreach ($page['media']['nodes'] ?? [] as $node) {
+                $nodes[] = $node;
+            }
+
+            $pageInfo = $page['media']['pageInfo'] ?? [];
+            $after    = $pageInfo['endCursor'] ?? null;
+        } while (($pageInfo['hasNextPage'] ?? false) && $after !== null);
+
+        return [$nodes, $product];
+    }
+
+    /**
+     * Match the media a create call returned to the inputs that produced them,
+     * as `input index => media id`.
+     *
+     * An input whose alt text is unique in the batch is matched by that alt, so
+     * a partial failure can't shift ids onto the wrong inputs. Anything not
+     * matched that way (the same description on two images, or alt text Shopify
+     * normalised) is matched by position — but only when every input was
+     * created, so nothing can have shifted.
+     *
+     * @param list<array<string,mixed>> $inputs  CreateMediaInput payloads
+     * @param list<array<string,mixed>> $created media nodes, in creation order
+     * @return array<int,string>
+     */
+    private static function pairCreated(array $inputs, array $created): array
+    {
+        $altCounts = array_count_values(array_map(static fn (array $input): string => (string) ($input['alt'] ?? ''), $inputs));
+
+        $idByAlt = [];
+        foreach ($created as $node) {
+            $alt = (string) ($node['alt'] ?? '');
+            if (isset($node['id']) && ($altCounts[$alt] ?? 0) === 1 && $alt !== '') {
+                $idByAlt[$alt] ??= (string) $node['id'];
+            }
+        }
+
+        // By alt first; whatever is left falls back to position, which is only
+        // trusted when every input was created (nothing can have shifted).
+        $allCreated = count($created) === count($inputs);
+        $paired     = [];
+        foreach ($inputs as $index => $input) {
+            $alt = (string) ($input['alt'] ?? '');
+            if (isset($idByAlt[$alt])) {
+                $paired[$index] = $idByAlt[$alt];
+            }
+        }
+        if ($allCreated) {
+            $taken = array_flip($paired);
+            foreach ($inputs as $index => $input) {
+                $mediaId = $created[$index]['id'] ?? null;
+                if (!isset($paired[$index]) && $mediaId !== null && !isset($taken[(string) $mediaId])) {
+                    $paired[$index] = (string) $mediaId;
+                }
+            }
+        }
+        ksort($paired);
+
+        return $paired;
     }
 
     /**
@@ -474,37 +711,44 @@ final class Products extends AbstractResource
     /**
      * Synchronise a product's images to the given ordered slots, idempotently:
      * for each slot, upload the local file (or use its URL), then **replace** the
-     * existing media if one already carries the slot's key (its `alt`) — so a
-     * re-sync never creates duplicate files — otherwise create it. Finally,
-     * reorder all touched media to the slots' positions (slot position 1 = main).
+     * existing media if the slot's key is already on the product — so a re-sync
+     * never creates duplicate files — otherwise create it. Finally, reorder all
+     * touched media to the slots' positions (slot position 1 = main).
      *
      * This matches the "FTP folder of `SKU_1`, `SKU_2`, …" workflow: pair it with
      * {@see \Baldie81\ShopifyGraphQL\Support\MediaFolder::scan()} and
      * {@see findIdBySku()}.
      *
-     * With `$prune` true it becomes a *mirror*: existing keyed media (those with an
-     * `alt`) whose key isn't in `$slots` are deleted, so the product ends up with
-     * exactly the supplied set. Media without an `alt` are left untouched.
+     * **How keys are matched.** The product's `key => media id` map is kept in a
+     * {@see MediaKeyStore} (by default a metafield on the product) and media is
+     * recognised by id, so alt text is free for real descriptions and editing
+     * it in the admin doesn't cause a duplicate. Media synced before key maps
+     * existed is adopted by its alt text once (listed under `adopted`).
+     *
+     * **Alt text.** A slot's `alt` is used when given. Otherwise a new image gets
+     * its key as alt text and a replaced image keeps the alt text it has.
+     *
+     * With `$prune` true it becomes a *mirror*: media this SDK tracks whose key
+     * isn't in `$slots` is removed from the product, so the product ends up with
+     * exactly the supplied set. Untracked media is left untouched.
+     *
+     * If the key map can't be saved after the media was changed, the call still
+     * returns: `keyStoreSaved` is false and the reason is in `userErrors`.
+     * Persist `media` and sync again to repair it.
      *
      * @param list<MediaEntry> $slots
-     * @return array{media:list<array{key:string,id:string,action:string}>,created:list<string>,replaced:list<string>,pruned:list<string>,orderedIds:list<string>,reorder:array<string,mixed>,userErrors:list<array<string,mixed>>}
+     * @return array{media:list<array{key:string,id:string,action:string}>,created:list<string>,replaced:list<string>,pruned:list<string>,adopted:list<string>,orderedIds:list<string>,reorder:array<string,mixed>,keyStoreSaved:bool,userErrors:list<array<string,mixed>>}
+     * @throws MediaKeyStoreException when no key store can be read (nothing is changed)
      */
     public function syncMedia(string $id, array $slots, bool $prune = false): array
     {
         $gid   = Gid::product($id);
         $files = $this->files;
 
-        $existing = [];
-        $knownIds = [];
-        foreach ($this->media($gid) as $node) {
-            if (isset($node['id'])) {
-                $knownIds[] = (string) $node['id'];
-            }
-            $alt = $node['alt'] ?? null;
-            if (is_string($alt) && $alt !== '' && isset($node['id'])) {
-                $existing[$alt] = (string) $node['id'];
-            }
-        }
+        // Read first: if the key stores are unreadable we stop before uploading.
+        $state    = $this->resolveMediaKeys($gid);
+        $existing = $state['known'];
+        $knownIds = $state['ids'];
 
         usort($slots, static fn (MediaEntry $a, MediaEntry $b): int => $a->position() <=> $b->position());
 
@@ -530,12 +774,16 @@ final class Products extends AbstractResource
             $key    = $slot->key();
             $source = $slot->isLocal() ? $uploaded[$i] : $slot->source();
 
-            if (isset($existing[$key]) && $existing[$key] !== '') {
-                $replaceInputs[] = ['id' => $existing[$key], 'originalSource' => $source, 'alt' => $key];
+            if (isset($existing[$key])) {
+                $input = ['id' => $existing[$key], 'originalSource' => $source];
+                if ($slot->alt() !== null) {
+                    $input['alt'] = $slot->alt(); // otherwise the image keeps its alt text
+                }
+                $replaceInputs[] = $input;
                 $replaced[]      = $key;
                 $action[$key]    = 'replaced';
             } else {
-                $createInputs[] = ['originalSource' => $source, 'mediaContentType' => 'IMAGE', 'alt' => $key];
+                $createInputs[] = ['originalSource' => $source, 'mediaContentType' => 'IMAGE', 'alt' => $slot->alt() ?? $key];
                 $createKeys[]   = $key;
             }
         }
@@ -555,22 +803,11 @@ final class Products extends AbstractResource
             foreach ($result['userErrors'] as $error) {
                 $userErrors[] = $error;
             }
-            // Pair each new media with its slot by key (the `alt` we sent), not by
-            // list position — a partial failure would otherwise shift every id
-            // onto the wrong slot.
-            $idByKey = [];
-            foreach ($result['media'] as $node) {
-                $alt = $node['alt'] ?? null;
-                if (is_string($alt) && isset($node['id']) && !isset($idByKey[$alt])) {
-                    $idByKey[$alt] = (string) $node['id'];
-                }
-            }
-            foreach ($createKeys as $key) {
-                if (isset($idByKey[$key])) {
-                    $existing[$key] = $idByKey[$key];
-                    $created[]      = $key;
-                    $action[$key]   = 'created';
-                }
+            foreach (self::pairCreated($createInputs, $result['media']) as $index => $mediaId) {
+                $key            = $createKeys[$index];
+                $existing[$key] = $mediaId;
+                $created[]      = $key;
+                $action[$key]   = 'created';
             }
         }
 
@@ -580,11 +817,10 @@ final class Products extends AbstractResource
         $orderedIds = [];
         $media      = [];
         foreach ($slots as $slot) {
-            $key     = $slot->key();
-            $mediaId = $existing[$key] ?? null;
-            if ($mediaId !== null && $mediaId !== '') {
-                $orderedIds[] = $mediaId;
-                $media[]      = ['key' => $key, 'id' => $mediaId, 'action' => $action[$key] ?? 'unchanged'];
+            $key = $slot->key();
+            if (isset($existing[$key])) {
+                $orderedIds[] = $existing[$key];
+                $media[]      = ['key' => $key, 'id' => $existing[$key], 'action' => $action[$key] ?? 'unchanged'];
             }
         }
 
@@ -596,16 +832,16 @@ final class Products extends AbstractResource
             }
         }
 
-        // Mirror mode: delete keyed media that the slots didn't cover.
+        // Mirror mode: remove tracked media that the slots didn't cover.
         $pruned = [];
         if ($prune) {
-            $incoming  = [];
+            $incoming = [];
             foreach ($slots as $slot) {
                 $incoming[$slot->key()] = true;
             }
             $orphanIds = [];
             foreach ($existing as $key => $mediaId) {
-                if ($mediaId !== '' && !isset($incoming[$key])) {
+                if (!isset($incoming[$key])) {
                     $orphanIds[] = $mediaId;
                 }
             }
@@ -618,14 +854,23 @@ final class Products extends AbstractResource
             }
         }
 
+        // Remember what is on the product now (minus anything just removed).
+        $map   = array_diff($existing, $pruned);
+        $error = $this->saveMediaKeys($gid, $map, $state['loaded']);
+        if ($error !== null) {
+            $userErrors[] = $error;
+        }
+
         return [
-            'media'      => $media,      // list of { key, id (gid), action } in final order
-            'created'    => $created,    // keys created
-            'replaced'   => $replaced,   // keys replaced
-            'pruned'     => $pruned,     // media gids deleted (prune mode)
-            'orderedIds' => $orderedIds, // media gids in final order
-            'reorder'    => $reorder,    // { job: { id, done }, mediaUserErrors }
-            'userErrors' => $userErrors, // aggregated, for logging
+            'media'         => $media,              // list of { key, id (gid), action } in final order
+            'created'       => $created,            // keys created
+            'replaced'      => $replaced,           // keys replaced
+            'pruned'        => $pruned,             // media gids removed (prune mode)
+            'adopted'       => $state['adopted'],   // keys matched by alt text (one-time migration)
+            'orderedIds'    => $orderedIds,         // media gids in final order
+            'reorder'       => $reorder,            // { job: { id, done }, mediaUserErrors }
+            'keyStoreSaved' => $error === null,     // false: the key map could not be written
+            'userErrors'    => $userErrors,         // aggregated, for logging
         ];
     }
 

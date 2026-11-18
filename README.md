@@ -56,6 +56,7 @@ REST Admin API, so this is GraphQL-only from the start.
   `BulkOperationStatus`, `BulkOperationType`, `WebhookTopic`, `ProductTranslatableField`.
 - **`Exceptions`** — `GraphQLException` (top-level errors / non-2xx), `ThrottledException`
   (cost-limit / 429), `TransportException`, `UploadException`, `PollTimeoutException`,
+  `MediaKeyStoreException`,
   under a `ShopifyException` base.
 
 ## Quick start
@@ -149,32 +150,79 @@ $shopify->metafieldDefinitions()->defineProduct('specs', 'rating', MetafieldType
 
 ## Media (idempotent / upsert)
 
-`productCreateMedia` does **not** dedupe by source, so calling it twice creates
-duplicate files. `ensureMedia()` fixes that: it compares each media's **key (its
-`alt`)** against the product's existing media and creates only what's missing — so
-re-runs never add the same asset twice. Give each asset a stable `alt` (it defaults
-to the source filename).
+Shopify does **not** dedupe media by source, so attaching the same image twice
+creates a duplicate file. `ensureMedia()` fixes that: every media has a **key** (by
+default the source's filename), and only media whose key isn't on the product yet
+is created — so re-runs never add the same asset twice.
 
 ```php
 use Baldie81\ShopifyGraphQL\Support\Media;
 
 $result = $shopify->products()->ensureMedia($productId, [
-    Media::image('https://cdn.example.com/front.jpg', alt: 'front'),
-    Media::image('https://cdn.example.com/back.jpg',  alt: 'back'),
+    Media::image('https://cdn.example.com/front.jpg', alt: 'Red tee, front', key: 'front'),
+    Media::image('https://cdn.example.com/back.jpg',  alt: 'Red tee, back',  key: 'back'),
 ]);
-// $result === ['added' => [...], 'skipped' => ['front'], 'mediaUserErrors' => []]
+// $result === ['added' => [...], 'skipped' => ['front'], 'mediaUserErrors' => [], 'keyStoreSaved' => true]
 
 // Run it again with the same input → everything is skipped, nothing duplicated.
 $shopify->products()->addMedia($productId, [...]);  // raw, non-idempotent escape hatch
 ```
 
-> Idempotency is keyed on `alt` because that's the only writable, queryable string
-> on a media object — so reserve `alt` as a stable key per asset. **Trade-off:**
-> the key is what shoppers' screen readers and search engines see as the image's
-> alt text, and if a merchant edits the alt text in the admin the media no longer
-> matches its key (the next sync adds it again). If you need descriptive alt text,
-> keep your own `key → media id` map from the `syncMedia()` result (`media[].id`)
-> and use `files()->update()` / `deleteMedia()` directly.
+### How media is recognised (key stores)
+
+The SDK remembers which image belongs to which key in a small map per product —
+`{"ACME_1.jpg": "gid://shopify/MediaImage/123", …}` — and recognises existing media
+**by id**. Alt text is therefore free for real descriptions, and editing it in the
+Shopify admin doesn't cause a duplicate on the next sync.
+
+Where the map lives is pluggable:
+
+| Store | Where | Notes |
+|---|---|---|
+| `MetafieldMediaKeyStore` (**default**) | JSON metafield `shopify_gql_sdk.media_keys` on the product | Nothing to set up; travels with the store; read in the same request as the media. Not shown on the product page (no definition) and not exposed to the storefront. |
+| `JsonFileMediaKeyStore` | One JSON file per product under a directory you choose | Directory is created on first write. Must persist across deploys and be backed up; local to one machine. |
+| `ChainMediaKeyStore` | Several stores in priority order | For each key, the first store with a still-valid id wins; all are written. |
+| `NullMediaKeyStore` | Nowhere | Opt out: match by alt text only, as before 1.4. |
+
+```php
+use Baldie81\ShopifyGraphQL\MediaKeys\{ChainMediaKeyStore, JsonFileMediaKeyStore, MetafieldMediaKeyStore};
+
+// Metafield first, a local JSON copy second (e.g. CodeIgniter 4's writable folder):
+$shopify->useMediaKeyStore(new ChainMediaKeyStore(
+    new MetafieldMediaKeyStore($shopify->graphql()),
+    new JsonFileMediaKeyStore(WRITEPATH . 'shopify/media-keys'),
+));
+```
+
+Implement `MediaKeyStore` (`load` / `save` / `forget`) to keep the map in your own
+database instead.
+
+**Matching rules**
+
+1. A key maps to the media id stored for it, provided that media is still on the
+   product. Entries for media that is gone are dropped.
+2. Only when **no** stored entry is usable — a product synced before 1.4, or a
+   duplicated/migrated product whose stored ids belong elsewhere — is existing
+   media **adopted by its alt text**, once. The map is then written, and from the
+   next sync on rule 1 applies. Adopted keys are listed in the result (`adopted`).
+
+**Alt text.** Pass `alt:` for a real description. Without it, a new image gets its
+key as alt text and a replaced image keeps the alt text it already has.
+
+**Things to know**
+
+- Rule 2 needs the key in the alt text. If you set your own alt text **and** a
+  product is later duplicated in the admin or the store is migrated, the copy's
+  first sync can't recognise its images and adds them again. A second store that
+  isn't copied with the product (the JSON file, or your database) doesn't help
+  here either, because the copy has a new product id.
+- If the map can't be saved after media was changed, the call still returns, with
+  `keyStoreSaved: false` and the reason in `userErrors`. Sync again to repair it.
+- If no store can be read at all, the call throws `MediaKeyStoreException` before
+  changing anything.
+- Upgrade every process that syncs a store: media added by an older version after
+  a product has a map isn't recognised.
+- Never point `JsonFileMediaKeyStore` at a cache directory that gets cleared.
 
 Media is attached with `productUpdate(media: …)` and removed with `fileUpdate`
 (the older `productCreateMedia` / `productDeleteMedia` are deprecated by Shopify).
@@ -197,13 +245,14 @@ foreach (MediaFolder::scan('/ftp/incoming') as $sku => $slots) {
         continue; // unknown SKU
     }
     $result = $shopify->products()->syncMedia($productId, $slots);
-    // ['media' => [{key,id,action}], 'created'=>[...], 'replaced'=>[...], 'pruned'=>[...], 'orderedIds'=>[...], 'reorder'=>..., 'userErrors'=>[]]
+    // ['media' => [{key,id,action}], 'created'=>[...], 'replaced'=>[...], 'pruned'=>[...], 'adopted'=>[...],
+    //  'orderedIds'=>[...], 'reorder'=>..., 'keyStoreSaved'=>true, 'userErrors'=>[]]
 }
 ```
 
 For each slot `syncMedia()`:
 1. uploads the local file (staged upload) — or uses the URL for `MediaEntry::url()`;
-2. if a media with the same key (`alt`, defaulting to the filename) already exists,
+2. if the slot's key (the filename by default) is already on the product,
    **replaces its bytes in place via `fileUpdate`** (no duplicate file) — otherwise
    creates it;
 3. **reorders** all touched media so positions match (`_1` → first, `_2` → second…).
@@ -212,12 +261,25 @@ So re-dropping `ACME-1_1.jpg` with new content swaps that one image and keeps th
 order, instead of piling up duplicates.
 
 By default it's additive (it never removes media you didn't list). Pass
-**`prune: true`** to make it a *mirror* — keyed media not in the new set are deleted
-so the product ends up with exactly the supplied images (handy after renames):
+**`prune: true`** to make it a *mirror* — media the SDK tracks that isn't in the new
+set is removed, so the product ends up with exactly the supplied images (handy
+after renames). Images the SDK doesn't track, such as a merchant's own uploads, are
+left alone:
 
 ```php
 $shopify->products()->syncMedia($productId, $slots, prune: true);
 // $result['pruned'] === the media gids that were removed
+```
+
+To set real alt text, build the slots yourself (the filename stays the key):
+
+```php
+use Baldie81\ShopifyGraphQL\Support\MediaEntry;
+
+$shopify->products()->syncMedia($productId, [
+    MediaEntry::file(1, '/ftp/incoming/ACME-1_1.jpg', alt: 'Red tee, front'),
+    MediaEntry::file(2, '/ftp/incoming/ACME-1_2.jpg', alt: 'Red tee, back'),
+]);
 ```
 
 The low-level pieces are available too: `files()->upload($path)`,
@@ -560,7 +622,7 @@ than just a success flag:
 | `create()` / `update()` | `product` (incl. `id` GID and `legacyResourceId` numeric id), `userErrors`, and `translations` when fields carried any |
 | `get()` / `search*()` | product nodes with `id` + `legacyResourceId` + timestamps |
 | `setMetafields()` | `metafields` (`id` GID, `legacyResourceId`, `namespace/key/type/value`, timestamps), `userErrors` |
-| `syncMedia()` | `media` (`{ key, id (GID), action }` per slot), `created`/`replaced`/`pruned`, `orderedIds`, `reorder.job`, aggregated `userErrors` |
+| `syncMedia()` | `media` (`{ key, id (GID), action }` per slot), `created`/`replaced`/`pruned`/`adopted`, `orderedIds`, `reorder.job`, `keyStoreSaved`, aggregated `userErrors` |
 | `addMedia()` / `ensureMedia()` / `deleteMedia()` | the created media nodes / `deletedMediaIds` with `id`s, plus `mediaUserErrors` |
 | `setTranslations()` / `translations()->set()/register()` | `translations` (each with `translatableContentDigest`), the `digests` map, `userErrors`, `skipped` |
 | `bulkOperations()` | `bulkOperation` (`id`, `status`, `url`, `objectCount`, …), `userErrors` |
@@ -621,6 +683,7 @@ first — never commit real tokens), then call a class, e.g.
 - [TranslationExamples](examples/TranslationExamples.php) — translate resources
 - [MetafieldDefinitionExamples](examples/MetafieldDefinitionExamples.php) — define product/order/customer metafields
 - [FileExamples](examples/FileExamples.php) — upload files, update in place
+- [MediaKeyStoreExamples](examples/MediaKeyStoreExamples.php) — where media key maps are kept (metafield, JSON file, CodeIgniter 4 wiring)
 - [BulkOperationExamples](examples/BulkOperationExamples.php) — bulk export/import with streamed results
 
 ## Tests

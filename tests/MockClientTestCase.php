@@ -8,6 +8,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
+use Baldie81\ShopifyGraphQL\MediaKeys\NullMediaKeyStore;
 use Baldie81\ShopifyGraphQL\ShopifyClient;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\RequestInterface;
@@ -39,6 +40,17 @@ abstract class MockClientTestCase extends TestCase
         ]);
 
         return ShopifyClient::fromGuzzle($guzzle, $apiVersion);
+    }
+
+    /**
+     * A client that keeps no media key map, so media is matched by alt text only
+     * (the pre-1.4 behaviour) and no key-store requests are made.
+     *
+     * @param list<mixed> $responses
+     */
+    protected function altOnlyClient(array $responses, string $apiVersion = '2026-10'): ShopifyClient
+    {
+        return $this->mockClient($responses, $apiVersion)->useMediaKeyStore(new NullMediaKeyStore());
     }
 
     protected function lastRequest(): RequestInterface

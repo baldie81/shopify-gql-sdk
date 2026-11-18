@@ -12,7 +12,7 @@ final class ProductsMediaTest extends MockClientTestCase
 {
     public function testAddMediaSendsCreateMediaInput(): void
     {
-        $client = $this->mockClient([
+        $client = $this->altOnlyClient([
             // media already on the product (so the new node can be told apart)
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
                 ['id' => 'gid://shopify/MediaImage/0', 'alt' => 'old.jpg'],
@@ -45,7 +45,7 @@ final class ProductsMediaTest extends MockClientTestCase
 
     public function testEnsureMediaSkipsExistingAndAddsTheRest(): void
     {
-        $client = $this->mockClient([
+        $client = $this->altOnlyClient([
             // existing media on the product
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
                 ['id' => 'gid://shopify/MediaImage/1', 'alt' => 'front.jpg', 'mediaContentType' => 'IMAGE'],
@@ -78,7 +78,7 @@ final class ProductsMediaTest extends MockClientTestCase
 
     public function testEnsureMediaMakesNoMutationWhenAllPresent(): void
     {
-        $client = $this->mockClient([
+        $client = $this->altOnlyClient([
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
                 ['id' => '1', 'alt' => 'front.jpg'],
                 ['id' => '2', 'alt' => 'back.jpg'],
@@ -97,7 +97,7 @@ final class ProductsMediaTest extends MockClientTestCase
 
     public function testEnsureMediaDedupesWithinBatch(): void
     {
-        $client = $this->mockClient([
+        $client = $this->altOnlyClient([
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => []]]]])),
             new Response(200, [], (string) json_encode(['data' => ['productCreateMedia' => [
                 'media' => [['id' => '9', 'alt' => 'dup.jpg']], 'mediaUserErrors' => [],

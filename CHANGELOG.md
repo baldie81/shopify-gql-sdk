@@ -4,6 +4,63 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-18
+
+Media is now recognised by id, through a stored key map, instead of by alt text.
+This resolves the "known limitation" listed under 1.3.0.
+
+### Behaviour changes
+
+- **`syncMedia()` and `ensureMedia()` keep a `key => media id` map per product**,
+  by default in a JSON metafield on the product (`shopify_gql_sdk.media_keys`).
+  Upgrading therefore starts writing one metafield to each product you sync. To
+  keep the old alt-only behaviour, call
+  `$shopify->useMediaKeyStore(new NullMediaKeyStore())`.
+- **Existing media is adopted automatically.** A product that has no map yet has
+  its media matched by alt text once, exactly as before, and the map is written.
+  Nothing is duplicated on upgrade.
+- **Once a product has a map, alt text is no longer consulted.** Editing an
+  image's alt text in the admin no longer causes a duplicate on the next sync.
+- **A replaced image keeps its alt text** unless you pass one. Previously every
+  sync overwrote it with the key.
+- **`syncMedia(prune: true)` removes only media the SDK tracks.** Once a product
+  has a map, images added outside the SDK are left alone even if they have alt
+  text.
+- `syncMedia()` throws `MediaKeyStoreException` — before changing anything — if
+  no key store can be read.
+
+### Added
+
+- `MediaKeys\MediaKeyStore` interface with four implementations:
+  `MetafieldMediaKeyStore` (default), `JsonFileMediaKeyStore` (one file per
+  product; the directory is created on first write), `ChainMediaKeyStore`
+  (several stores in priority order) and `NullMediaKeyStore` (opt out).
+- `ShopifyClient::useMediaKeyStore()`; `Products` accepts a store in its
+  constructor.
+- Real alt text: `MediaEntry::file()` / `::url()` take `alt:`, and
+  `Media::make()` / `::image()` take `key:` so `alt:` can be a description.
+  Passing only `alt:` to `Media` still uses it as the key, as before.
+- `syncMedia()` returns `adopted` (keys matched by alt during the one-time
+  adoption) and `keyStoreSaved`; `ensureMedia()` returns `keyStoreSaved`. A map
+  that can't be saved after media was changed is reported in the result
+  (`code: MEDIA_KEY_STORE_FAILED`), not thrown.
+- `MediaKeyStoreExamples`, including CodeIgniter 4 wiring.
+
+### Fixed
+
+- Newly created media is matched to its slot by alt text where that is
+  unambiguous and by position otherwise, so two images with the same
+  description are no longer confused.
+
+### Known limitations
+
+- If you set your own alt text and a product is later duplicated in the admin,
+  or the store is migrated, the copy's first sync cannot recognise its images
+  and adds them again.
+- All processes syncing a store must run 1.4 or later: media added by an older
+  version after a product has a map is not recognised.
+- Two simultaneous syncs of the same product: the last one to save its map wins.
+
 ## [1.3.0] - 2026-11-18
 
 A correctness release from a full review of the package. No method was removed
@@ -135,6 +192,7 @@ silently** — read "Behaviour changes" before upgrading.
   collections, fulfillment orders, price lists, draft orders, gift cards,
   webhooks, metafields and definitions, translations, files and bulk operations.
 
+[1.4.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.0.0...v1.1.0
