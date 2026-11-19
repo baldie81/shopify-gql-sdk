@@ -59,6 +59,42 @@ final class OrdersTest extends MockClientTestCase
         self::assertSame('1Z999', $fulfillment['trackingInfo']['number']);
     }
 
+    public function testFulfillCreatesOneFulfillmentPerAssignedLocation(): void
+    {
+        // fulfillmentCreate only accepts fulfillment orders assigned to the same location.
+        $fo = static fn (int $id, int $location): array => [
+            'id' => "gid://shopify/FulfillmentOrder/{$id}", 'status' => 'OPEN',
+            'assignedLocation' => ['location' => ['id' => "gid://shopify/Location/{$location}"]],
+        ];
+        $client = $this->mockClient([
+            new Response(200, [], (string) json_encode(['data' => ['order' => ['fulfillmentOrders' => ['nodes' => [$fo(1, 10), $fo(2, 20), $fo(3, 10)]]]]])),
+            new Response(200, [], (string) json_encode(['data' => ['fulfillmentCreate' => [
+                'fulfillment' => ['id' => 'gid://shopify/Fulfillment/1', 'status' => 'SUCCESS'], 'userErrors' => [],
+            ]]])),
+            new Response(200, [], (string) json_encode(['data' => ['fulfillmentCreate' => [
+                'fulfillment' => null, 'userErrors' => [['field' => ['fulfillment'], 'message' => 'Location is inactive']],
+            ]]])),
+        ]);
+
+        $result = $client->orders()->fulfill('7', ['number' => 'T1']);
+
+        self::assertStringContainsString('assignedLocation { location { id } }', $this->body(0)['query']);
+        self::assertSame(
+            [['fulfillmentOrderId' => 'gid://shopify/FulfillmentOrder/1'], ['fulfillmentOrderId' => 'gid://shopify/FulfillmentOrder/3']],
+            $this->body(1)['variables']['fulfillment']['lineItemsByFulfillmentOrder'],
+        );
+        self::assertSame(
+            [['fulfillmentOrderId' => 'gid://shopify/FulfillmentOrder/2']],
+            $this->body(2)['variables']['fulfillment']['lineItemsByFulfillmentOrder'],
+        );
+        self::assertSame('T1', $this->body(2)['variables']['fulfillment']['trackingInfo']['number']);
+
+        // The first location went through; the second one's error is reported alongside it.
+        self::assertSame('gid://shopify/Fulfillment/1', $result['fulfillment']['id']);
+        self::assertCount(1, $result['fulfillments']);
+        self::assertSame('Location is inactive', $result['userErrors'][0]['message']);
+    }
+
     public function testFulfillWithNothingFulfillableSkipsMutation(): void
     {
         $client = $this->mockClient([

@@ -47,11 +47,19 @@ final class ProductsMediaKeysTest extends MockClientTestCase
     /**
      * The media-read response: the product's media plus (optionally) the stored map.
      *
+     * A stored map names the product it was written for; pass `$owner: null` for
+     * a map written before that was recorded (1.4.0/1.4.1), or another product's
+     * GID for a map copied along with a duplicated product.
+     *
      * @param list<array<string,mixed>>  $nodes
      * @param array<string,string>|null  $map
      */
-    private static function media(array $nodes, ?array $map = null): Response
+    private static function media(array $nodes, ?array $map = null, ?string $owner = self::PRODUCT): Response
     {
+        if ($map !== null && $owner !== null) {
+            $map[MediaKeyStore::OWNER_KEY] = $owner;
+        }
+
         return new Response(200, [], (string) json_encode(['data' => ['product' => [
             'mediaKeys' => $map === null ? null : ['value' => json_encode((object) $map)],
             'media'     => ['nodes' => $nodes, 'pageInfo' => ['hasNextPage' => false, 'endCursor' => null]],
@@ -79,7 +87,10 @@ final class ProductsMediaKeysTest extends MockClientTestCase
     }
 
     /**
-     * @return array<string,string> the map written by the metafieldsSet request at $index
+     * The keys written by the metafieldsSet request at $index. The map must be
+     * stamped with the product it belongs to; that entry is checked and left out.
+     *
+     * @return array<string,string>
      */
     private function savedMap(int $index): array
     {
@@ -91,7 +102,11 @@ final class ProductsMediaKeysTest extends MockClientTestCase
         self::assertSame('media_keys', $input['key']);
         self::assertSame('json', $input['type']);
 
-        return json_decode($input['value'], true);
+        $map = json_decode($input['value'], true);
+        self::assertSame(self::PRODUCT, $map[MediaKeyStore::OWNER_KEY] ?? null);
+        unset($map[MediaKeyStore::OWNER_KEY]);
+
+        return $map;
     }
 
     public function testTheMapIsReadInTheSameRequestAsTheMedia(): void
@@ -181,13 +196,36 @@ final class ProductsMediaKeysTest extends MockClientTestCase
         self::assertSame(['A_1.jpg' => 'gid://shopify/MediaImage/1'], $this->savedMap(2));
     }
 
-    public function testAStaleMapFromADuplicatedProductFallsBackToAdoption(): void
+    public function testAMapCopiedFromADuplicatedProductIsIgnoredAndMediaAdopted(): void
     {
-        // The map was copied with the product; its ids belong to the original.
+        // The map was copied with the product: it names the original, and so do its ids.
+        $client = $this->mockClient([
+            self::media(
+                // Even an id that happens to match is not trusted from another product's map.
+                [['id' => 'gid://shopify/MediaImage/900', 'alt' => 'A_1.jpg'], ['id' => 'gid://shopify/MediaImage/2', 'alt' => '']],
+                ['A_1.jpg' => 'gid://shopify/MediaImage/1', 'B_1.jpg' => 'gid://shopify/MediaImage/2'],
+                owner: 'gid://shopify/Product/1',
+            ),
+            self::replaced(),
+            self::saved(),
+        ]);
+
+        $result = $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.test/A_1.jpg')]);
+
+        self::assertSame(['A_1.jpg'], $result['adopted']);
+        self::assertSame('gid://shopify/MediaImage/900', $this->body(1)['variables']['files'][0]['id']); // never the stale id
+        self::assertSame(['A_1.jpg' => 'gid://shopify/MediaImage/900'], $this->savedMap(2)); // re-stamped for this product
+    }
+
+    public function testAStaleMapWithNoOwnerRecordedStillFallsBackToAdoption(): void
+    {
+        // Written by 1.4.0/1.4.1, which didn't record the owner: can't be told
+        // apart from a duplicated product's map, so it is adopted as before.
         $client = $this->mockClient([
             self::media(
                 [['id' => 'gid://shopify/MediaImage/900', 'alt' => 'A_1.jpg']],
                 ['A_1.jpg' => 'gid://shopify/MediaImage/1'],
+                owner: null,
             ),
             self::replaced(),
             self::saved(),
@@ -198,6 +236,80 @@ final class ProductsMediaKeysTest extends MockClientTestCase
         self::assertSame(['A_1.jpg'], $result['adopted']);
         self::assertSame('gid://shopify/MediaImage/900', $this->body(1)['variables']['files'][0]['id']); // never the stale id
         self::assertSame(['A_1.jpg' => 'gid://shopify/MediaImage/900'], $this->savedMap(2));
+    }
+
+    public function testAMapWithNoOwnerRecordedIsStampedOnTheNextSync(): void
+    {
+        $client = $this->mockClient([
+            self::media([['id' => 'gid://shopify/MediaImage/1', 'alt' => 'x']], ['A_1.jpg' => 'gid://shopify/MediaImage/1'], owner: null),
+            self::replaced(),
+            self::saved(),
+        ]);
+
+        $result = $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.test/A_1.jpg')]);
+
+        self::assertSame(['A_1.jpg'], $result['replaced']);
+        self::assertSame(['A_1.jpg' => 'gid://shopify/MediaImage/1'], $this->savedMap(2)); // savedMap() checks the owner
+    }
+
+    public function testAProductsOwnStaleMapDoesNotAdoptOrPruneTheMerchantsImages(): void
+    {
+        // The one tracked image was deleted in the admin, and the merchant added
+        // their own. The map is this product's, so nothing is adopted by alt text.
+        $client = $this->mockClient([
+            self::media(
+                [['id' => 'gid://shopify/MediaImage/5', 'alt' => 'Merchant photo']],
+                ['OLD_1.jpg' => 'gid://shopify/MediaImage/GONE'],
+            ),
+            self::created([['id' => 'gid://shopify/MediaImage/6', 'alt' => 'NEW_1.jpg']]),
+            self::saved(),
+        ]);
+
+        $result = $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.test/NEW_1.jpg')], prune: true);
+
+        self::assertSame([], $result['adopted']);
+        self::assertSame([], $result['pruned']);
+        self::assertSame(['NEW_1.jpg' => 'gid://shopify/MediaImage/6'], $this->savedMap(2));
+        self::assertCount(3, $this->history); // read, create, save — no detach
+    }
+
+    public function testAnEmptyMapOfItsOwnAlsoStopsAdoption(): void
+    {
+        $client = $this->mockClient([
+            self::media([['id' => 'gid://shopify/MediaImage/5', 'alt' => 'A_1.jpg']], []),
+            self::created([['id' => 'gid://shopify/MediaImage/6', 'alt' => 'A_1.jpg']]),
+            new Response(200, [], (string) json_encode(['data' => ['productReorderMedia' => ['job' => null, 'mediaUserErrors' => []]]])),
+            self::saved(),
+        ]);
+
+        $result = $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.test/A_1.jpg')]);
+
+        self::assertSame([], $result['adopted']);
+        self::assertSame(['A_1.jpg'], $result['created']);
+    }
+
+    public function testARejectedReplaceIsNotReportedAsReplaced(): void
+    {
+        $client = $this->mockClient([
+            self::media(
+                [['id' => 'gid://shopify/MediaImage/1', 'alt' => 'a'], ['id' => 'gid://shopify/MediaImage/2', 'alt' => 'b']],
+                ['A_1.jpg' => 'gid://shopify/MediaImage/1', 'A_2.jpg' => 'gid://shopify/MediaImage/2'],
+            ),
+            new Response(200, [], (string) json_encode(['data' => ['fileUpdate' => [
+                'files'      => [['id' => 'gid://shopify/MediaImage/2', 'alt' => 'b']],
+                'userErrors' => [['field' => ['files', '0'], 'message' => 'Invalid image', 'code' => 'INVALID']],
+            ]]])),
+            new Response(200, [], (string) json_encode(['data' => ['productReorderMedia' => ['job' => null, 'mediaUserErrors' => []]]])),
+        ]);
+
+        $result = $client->products()->syncMedia('55', [
+            MediaEntry::url(1, 'https://cdn.test/A_1.jpg'),
+            MediaEntry::url(2, 'https://cdn.test/A_2.jpg'),
+        ]);
+
+        self::assertSame(['A_2.jpg'], $result['replaced']);
+        self::assertSame(['unchanged', 'replaced'], array_column($result['media'], 'action'));
+        self::assertSame('Invalid image', $result['userErrors'][0]['message']);
     }
 
     public function testEntriesForMediaNoLongerOnTheProductAreDropped(): void
@@ -352,8 +464,9 @@ final class ProductsMediaKeysTest extends MockClientTestCase
         // The file knew the image, so it's replaced (not duplicated, not adopted by alt)…
         self::assertSame(['A_1.jpg'], $result['replaced']);
         self::assertSame([], $result['adopted']);
-        // …and the missing metafield is written again. The file was already right: not rewritten.
+        // …and the missing metafield is written again; the file gains the owner entry it lacked.
         self::assertSame(['A_1.jpg' => 'gid://shopify/MediaImage/1'], $this->savedMap(2));
+        self::assertSame(self::PRODUCT, $file->load(self::PRODUCT)[MediaKeyStore::OWNER_KEY]);
         self::assertCount(3, $this->history);
     }
 
@@ -371,7 +484,10 @@ final class ProductsMediaKeysTest extends MockClientTestCase
         $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.test/A_1.jpg')]);
 
         self::assertSame(['A_1.jpg' => 'gid://shopify/MediaImage/1'], $this->savedMap(2));
-        self::assertSame(['A_1.jpg' => 'gid://shopify/MediaImage/1'], $file->load(self::PRODUCT));
+        self::assertSame(
+            [MediaKeyStore::OWNER_KEY => self::PRODUCT, 'A_1.jpg' => 'gid://shopify/MediaImage/1'],
+            $file->load(self::PRODUCT),
+        );
         self::assertFileExists($this->dir . '/shopify/media-keys/55/55.json');
     }
 

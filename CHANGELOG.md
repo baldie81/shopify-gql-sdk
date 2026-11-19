@@ -6,6 +6,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`syncMedia(prune: true)` no longer removes a merchant's own images from a
+  product that already has a key map.** When every image a map tracked had been
+  deleted, the map counted as unusable, so the remaining images were adopted by
+  their alt text and then pruned. The map now records the product it was written
+  for (a reserved `@product` entry, `MediaKeyStore::OWNER_KEY`); a product with
+  its own map is never adopted from, and a map copied from a duplicated product
+  is ignored. Maps written by 1.4.0/1.4.1 gain the entry on their next sync —
+  until then they behave as before. Custom `MediaKeyStore` implementations
+  need no change as long as they store and return every entry of the map;
+  `load()` on the bundled stores now returns the `@product` entry too.
+- **`syncMedia()` no longer reports a replace that Shopify rejected.** A key
+  whose `fileUpdate` failed is left out of `replaced` and its `media` entry has
+  the action `unchanged` (it was `replaced` before); the error is in
+  `userErrors` as before.
+- **A mutation that doesn't begin with the word `mutation` is no longer retried
+  on a 502/503/504.** A document passed to `graphql()->execute()` with a leading
+  comment was taken for a query and could be sent twice. Only a document whose
+  first token is `query` or `{` is retried now, so a query that opens with a
+  fragment definition is no longer retried either.
+- **`orders()->fulfill()` works for orders split across locations.** Shopify
+  rejects a `fulfillmentCreate` whose fulfillment orders are assigned to
+  different locations, so one fulfillment is now created per location. The
+  result gains `fulfillments` (every fulfillment created); `fulfillment` is the
+  first of them, unchanged for single-location orders.
+
 ### Internal
 
 - CI: weekly scheduled run (catches Shopify schema changes and new dependency

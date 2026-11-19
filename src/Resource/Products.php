@@ -383,11 +383,17 @@ final class Products extends AbstractResource
      * it, provided that media is still on the product (with several stores, the
      * first one holding a still-valid id for a key wins). Alt text is ignored.
      *
-     * Only when no stored entry is usable at all — a product synced before key
-     * maps existed, or a duplicated/migrated product whose stored ids belong to
-     * another product — is the media *adopted* by alt text, once: every media
-     * with a non-empty alt becomes `alt => id`. Saving the result afterwards
-     * means the next sync is back to matching by id.
+     * A stored map names the product it was written for (the
+     * {@see MediaKeyStore::OWNER_KEY} entry). A map naming *another* product was
+     * copied along with a duplicated product and is ignored.
+     *
+     * Only when the product has no map of its own and no stored entry is usable
+     * — a product synced before key maps existed, or a duplicated/migrated
+     * product — is the media *adopted* by alt text, once: every media with a
+     * non-empty alt becomes `alt => id`. Saving the result afterwards means the
+     * next sync is back to matching by id. A product that does have its own map
+     * is never adopted from, even when every entry in it has gone stale, so
+     * images added outside the SDK stay untracked.
      *
      * @return array{ids:list<string>,known:array<string,string>,adopted:list<string>,loaded:list<array<string,string>|null>}
      * @throws MediaKeyStoreException when none of the stores can be read
@@ -432,19 +438,26 @@ final class Products extends AbstractResource
         $onProduct = array_flip($ids);
 
         $known = [];
+        $owned = false; // does any store hold a map written for this very product?
         foreach ($loaded as $map) {
+            $owner = $map[MediaKeyStore::OWNER_KEY] ?? null;
+            if ($owner !== null && $owner !== $gid) {
+                continue; // another product's map, copied when the product was duplicated
+            }
+            $owned = $owned || $owner === $gid;
+
             foreach ($map ?? [] as $key => $mediaId) {
-                if (isset($onProduct[$mediaId]) && !isset($known[$key])) {
+                if ((string) $key !== MediaKeyStore::OWNER_KEY && isset($onProduct[$mediaId]) && !isset($known[$key])) {
                     $known[(string) $key] = $mediaId;
                 }
             }
         }
 
         $adopted = [];
-        if ($known === []) {
+        if ($known === [] && !$owned) {
             foreach ($nodes as $node) {
                 $alt = $node['alt'] ?? null;
-                if (is_string($alt) && $alt !== '' && isset($node['id']) && !isset($known[$alt])) {
+                if (is_string($alt) && $alt !== '' && $alt !== MediaKeyStore::OWNER_KEY && isset($node['id']) && !isset($known[$alt])) {
                     $known[$alt] = (string) $node['id'];
                     $adopted[]   = $alt;
                 }
@@ -455,7 +468,8 @@ final class Products extends AbstractResource
     }
 
     /**
-     * Persist the key map to every store whose copy differs. Returns null on
+     * Persist the key map — stamped with the product it belongs to — to every
+     * store whose copy differs. Returns null on
      * success, or a userError-shaped entry describing the failure — the media
      * itself has already been changed by then, so this is reported, not thrown.
      *
@@ -465,6 +479,7 @@ final class Products extends AbstractResource
      */
     private function saveMediaKeys(string $gid, array $map, array $loaded): ?array
     {
+        $map[MediaKeyStore::OWNER_KEY] = $gid;
         ksort($map);
 
         $failures = [];
@@ -730,7 +745,11 @@ final class Products extends AbstractResource
      *
      * With `$prune` true it becomes a *mirror*: media this SDK tracks whose key
      * isn't in `$slots` is removed from the product, so the product ends up with
-     * exactly the supplied set. Untracked media is left untouched.
+     * exactly the supplied set. Untracked media is left untouched — except on a
+     * product's very first sync, where media adopted by alt text counts as tracked.
+     *
+     * A replace Shopify rejects is reported in `userErrors`; that key is left
+     * out of `replaced` and its `media` entry has the action `unchanged`.
      *
      * If the key map can't be saved after the media was changed, the call still
      * returns: `keyStoreSaved` is false and the reason is in `userErrors`.
@@ -766,7 +785,7 @@ final class Products extends AbstractResource
 
         // Partition into one batch of replaces and one batch of creates.
         $replaceInputs = [];
-        $replaced      = [];
+        $replaceKeys   = [];
         $createInputs  = [];
         $createKeys    = [];
         $action        = []; // key => 'created' | 'replaced'
@@ -780,8 +799,7 @@ final class Products extends AbstractResource
                     $input['alt'] = $slot->alt(); // otherwise the image keeps its alt text
                 }
                 $replaceInputs[] = $input;
-                $replaced[]      = $key;
-                $action[$key]    = 'replaced';
+                $replaceKeys[]   = $key;
             } else {
                 $createInputs[] = ['originalSource' => $source, 'mediaContentType' => 'IMAGE', 'alt' => $slot->alt() ?? $key];
                 $createKeys[]   = $key;
@@ -790,10 +808,22 @@ final class Products extends AbstractResource
 
         $userErrors = [];
 
+        $replaced = [];
         if ($replaceInputs !== []) {
             $result = $files->update($replaceInputs);
-            foreach ($result['userErrors'] ?? [] as $error) {
+            $errors = $result['userErrors'] ?? [];
+            foreach ($errors as $error) {
                 $userErrors[] = $error;
+            }
+
+            // Without errors every file was replaced. With errors, only the files
+            // Shopify returned as updated were — the rest are left as they are.
+            $updated = array_flip(array_column($result['files'] ?? [], 'id'));
+            foreach ($replaceKeys as $index => $key) {
+                if ($errors === [] || isset($updated[$replaceInputs[$index]['id']])) {
+                    $replaced[]   = $key;
+                    $action[$key] = 'replaced';
+                }
             }
         }
 

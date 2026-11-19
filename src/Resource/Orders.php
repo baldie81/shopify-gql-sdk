@@ -57,35 +57,57 @@ final class Orders extends AbstractResource
      * Fulfill an order's open fulfillment orders (all line items), optionally with
      * tracking. `$tracking` is `['number' => …, 'company' => …, 'url' => …]`.
      *
+     * Shopify only accepts fulfillment orders assigned to the same location in
+     * one `fulfillmentCreate`, so an order split across locations is fulfilled
+     * with one call per location (each carrying the same tracking). Every
+     * fulfillment created is listed under `fulfillments`; `fulfillment` is the
+     * first of them. If one location fails the others are still fulfilled — its
+     * errors are in `userErrors`.
+     *
      * @param array<string,mixed>|null $tracking
-     * @return array{fulfillment:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     * @return array{fulfillment:?array<string,mixed>,fulfillments:list<array<string,mixed>>,userErrors:list<array<string,mixed>>}
      */
     public function fulfill(string $id, ?array $tracking = null, bool $notifyCustomer = false): array
     {
         $foQuery = 'query ($id: ID!, $first: Int!, $after: String) { order(id: $id) {'
-            . ' fulfillmentOrders(first: $first, after: $after) { nodes { id status } pageInfo { hasNextPage endCursor } } } }';
+            . ' fulfillmentOrders(first: $first, after: $after) { nodes { id status assignedLocation { location { id } } }'
+            . ' pageInfo { hasNextPage endCursor } } } }';
         $nodes   = $this->paginateNodes($foQuery, ['id' => Gid::order($id)], ['order', 'fulfillmentOrders']);
 
-        $lineItemsByFulfillmentOrder = [];
+        // One fulfillment per assigned location, in the order the locations appear.
+        $byLocation = [];
         foreach ($nodes as $fo) {
             if (in_array($fo['status'] ?? '', ['OPEN', 'IN_PROGRESS', 'SCHEDULED'], true)) {
-                $lineItemsByFulfillmentOrder[] = ['fulfillmentOrderId' => $fo['id']];
+                $location                = (string) ($fo['assignedLocation']['location']['id'] ?? '');
+                $byLocation[$location][] = ['fulfillmentOrderId' => $fo['id']];
             }
         }
-        if ($lineItemsByFulfillmentOrder === []) {
-            return ['fulfillment' => null, 'userErrors' => [['message' => 'No fulfillable fulfillment orders.']]];
-        }
-
-        $fulfillment = ['lineItemsByFulfillmentOrder' => $lineItemsByFulfillmentOrder, 'notifyCustomer' => $notifyCustomer];
-        if ($tracking !== null) {
-            $fulfillment['trackingInfo'] = $tracking;
+        if ($byLocation === []) {
+            return ['fulfillment' => null, 'fulfillments' => [], 'userErrors' => [['message' => 'No fulfillable fulfillment orders.']]];
         }
 
         $mutation = 'mutation ($fulfillment: FulfillmentInput!) {'
             . ' fulfillmentCreate(fulfillment: $fulfillment) {'
             . ' fulfillment { id status trackingInfo { number company url } } userErrors { field message } } }';
 
-        return $this->gql->execute($mutation, ['fulfillment' => $fulfillment])['fulfillmentCreate'] ?? ['fulfillment' => null, 'userErrors' => []];
+        $fulfillments = [];
+        $userErrors   = [];
+        foreach ($byLocation as $lineItemsByFulfillmentOrder) {
+            $fulfillment = ['lineItemsByFulfillmentOrder' => $lineItemsByFulfillmentOrder, 'notifyCustomer' => $notifyCustomer];
+            if ($tracking !== null) {
+                $fulfillment['trackingInfo'] = $tracking;
+            }
+
+            $result = $this->gql->execute($mutation, ['fulfillment' => $fulfillment])['fulfillmentCreate'] ?? [];
+            if (isset($result['fulfillment'])) {
+                $fulfillments[] = $result['fulfillment'];
+            }
+            foreach ($result['userErrors'] ?? [] as $error) {
+                $userErrors[] = $error;
+            }
+        }
+
+        return ['fulfillment' => $fulfillments[0] ?? null, 'fulfillments' => $fulfillments, 'userErrors' => $userErrors];
     }
 
     /**

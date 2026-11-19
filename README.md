@@ -195,16 +195,22 @@ $shopify->useMediaKeyStore(new ChainMediaKeyStore(
 ```
 
 Implement `MediaKeyStore` (`load` / `save` / `forget`) to keep the map in your own
-database instead.
+database instead. Besides your keys, the map carries one reserved entry,
+`@product` (`MediaKeyStore::OWNER_KEY`), holding the GID of the product it was
+written for — store it and return it like any other entry.
 
 **Matching rules**
 
 1. A key maps to the media id stored for it, provided that media is still on the
    product. Entries for media that is gone are dropped.
-2. Only when **no** stored entry is usable — a product synced before 1.4, or a
-   duplicated/migrated product whose stored ids belong elsewhere — is existing
+2. A map names the product it was written for. A map naming another product —
+   copied along when a product is duplicated in the admin — is ignored.
+3. Only when the product has **no map of its own** and no stored entry is usable —
+   a product synced before 1.4, or a duplicated/migrated product — is existing
    media **adopted by its alt text**, once. The map is then written, and from the
    next sync on rule 1 applies. Adopted keys are listed in the result (`adopted`).
+   A product that has its own map is never adopted from, even if every image the
+   map tracked has since been deleted.
 
 **Alt text.** Pass `alt:` for a real description. Without it, a new image gets its
 key as alt text and a replaced image keeps the alt text it already has. An `alt:`
@@ -219,7 +225,7 @@ you pass is applied on every sync, so changing it in your code updates the image
 
 **Things to know**
 
-- Rule 2 needs the key in the alt text. If you set your own alt text **and** a
+- Rule 3 needs the key in the alt text. If you set your own alt text **and** a
   product is later duplicated in the admin or the store is migrated, the copy's
   first sync can't recognise its images and adds them again. A second store that
   isn't copied with the product (the JSON file, or your database) doesn't help
@@ -275,7 +281,9 @@ By default it's additive (it never removes media you didn't list). Pass
 **`prune: true`** to make it a *mirror* — media the SDK tracks that isn't in the new
 set is removed, so the product ends up with exactly the supplied images (handy
 after renames). Images the SDK doesn't track, such as a merchant's own uploads, are
-left alone:
+left alone. The one exception is a product's first sync (rule 3 above): images
+adopted by their alt text count as tracked, so with `prune: true` any of them not
+in the new set is removed:
 
 ```php
 $shopify->products()->syncMedia($productId, $slots, prune: true);
@@ -525,7 +533,8 @@ resource covers **read, fulfillment, refunds**, and writing state back onto the 
 $order = $shopify->orders()->get($orderId);                  // financial/fulfillment status, totals, customer
 $shopify->orders()->searchAll('financial_status:paid');
 
-// Fulfill all open fulfillment orders, with tracking:
+// Fulfill all open fulfillment orders, with tracking. An order split across
+// locations gets one fulfillment per location: all are in $result['fulfillments'].
 $shopify->orders()->fulfill($orderId, ['number' => '1Z999', 'company' => 'UPS'], notifyCustomer: true);
 
 // Refund (RefundInput body; orderId injected):
@@ -633,7 +642,7 @@ than just a success flag:
 | `create()` / `update()` | `product` (incl. `id` GID and `legacyResourceId` numeric id), `userErrors`, and `translations` when fields carried any |
 | `get()` / `search*()` | product nodes with `id` + `legacyResourceId` + timestamps |
 | `setMetafields()` | `metafields` (`id` GID, `legacyResourceId`, `namespace/key/type/value`, timestamps), `userErrors` |
-| `syncMedia()` | `media` (`{ key, id (GID), action }` per slot), `created`/`replaced`/`pruned`/`adopted`, `orderedIds`, `reorder.job`, `keyStoreSaved`, aggregated `userErrors` |
+| `syncMedia()` | `media` (`{ key, id (GID), action }` per slot; `action` is `created`, `replaced`, or `unchanged` when Shopify rejected the replace), `created`/`replaced`/`pruned`/`adopted`, `orderedIds`, `reorder.job`, `keyStoreSaved`, aggregated `userErrors` |
 | `addMedia()` / `ensureMedia()` / `deleteMedia()` | the created media nodes / `deletedMediaIds` with `id`s, plus `mediaUserErrors` |
 | `setTranslations()` / `translations()->set()/register()` | `translations` (each with `translatableContentDigest`), the `digests` map, `userErrors`, `skipped` |
 | `bulkOperations()` | `bulkOperation` (`id`, `status`, `url`, `objectCount`, …), `userErrors` |
@@ -664,7 +673,8 @@ Notes:
   HTTP 429, backs off (from `extensions.cost` / `Retry-After`) and retries —
   `Configuration::maxRetries`, default 2. A transient 502/503/504 is retried for
   **queries only**: a mutation may already have been applied, so it is never
-  blindly re-sent.
+  blindly re-sent. With `graphql()->execute()`, a document counts as a query when
+  its first token (after any comments) is `query` or `{`.
 - **GIDs.** Everything is identified by `gid://shopify/<Type>/<id>`; helpers coerce
   numeric ids and extract them back.
 - **Versioning.** The dated `apiVersion` is part of the endpoint and defaults to

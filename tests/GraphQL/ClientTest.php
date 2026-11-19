@@ -139,6 +139,43 @@ final class ClientTest extends TestCase
         self::assertSame([1_000_000], $this->slept);
     }
 
+    public function testGatewayErrorIsRetriedForShorthandAndCommentedQueries(): void
+    {
+        foreach (['{ x }', "# list\n, query Q { x }"] as $document) {
+            $this->slept = [];
+            $client      = $this->client([
+                new Response(503, [], ''),
+                new Response(200, [], (string) json_encode(['data' => ['ok' => true]])),
+            ]);
+
+            self::assertSame(['ok' => true], $client->execute($document));
+            self::assertSame([1_000_000], $this->slept);
+        }
+    }
+
+    public function testGatewayErrorIsNotRetriedUnlessTheDocumentIsPlainlyAQuery(): void
+    {
+        $documents = [
+            "# create a product\nmutation { productCreate { product { id } } }", // comment before the mutation
+            "\u{FEFF}  mutation { x }",
+            'fragment F on Product { id } mutation { x { ...F } }',
+            'queryish { x }',
+        ];
+
+        foreach ($documents as $document) {
+            $this->slept = [];
+            $client      = $this->client([new Response(503, [], '')]);
+
+            try {
+                $client->execute($document);
+                self::fail('expected GraphQLException');
+            } catch (GraphQLException $e) {
+                self::assertSame(503, $e->statusCode);
+                self::assertSame([], $this->slept, $document);
+            }
+        }
+    }
+
     public function testGatewayErrorIsNotRetriedForMutations(): void
     {
         // The write may already have been applied, so a blind retry could duplicate it.

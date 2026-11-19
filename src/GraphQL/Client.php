@@ -63,7 +63,8 @@ final class Client
      * Retries (up to `maxRetries`, with backoff) when Shopify throttles the
      * request — a `THROTTLED` error in the body or an HTTP 429 — and, for
      * *queries only*, on a transient 502/503/504. Mutations are never retried on
-     * a gateway error, since the write may already have been applied.
+     * a gateway error, since the write may already have been applied — and
+     * neither is a document that isn't plainly a query (see {@see isQuery()}).
      *
      * @param array<string,mixed> $variables
      * @return array<string,mixed>
@@ -90,7 +91,7 @@ final class Client
             }
 
             if ($status < 200 || $status >= 300) {
-                if ($canRetry && in_array($status, [502, 503, 504], true) && !self::isMutation($query)) {
+                if ($canRetry && in_array($status, [502, 503, 504], true) && self::isQuery($query)) {
                     ($this->sleeper)($this->retryAfterMicros($response, $attempt));
                     $attempt++;
                     continue;
@@ -192,9 +193,18 @@ final class Client
         );
     }
 
-    private static function isMutation(string $query): bool
+    /**
+     * Whether the document is plainly a query, and so safe to send again: its
+     * first token is `query` or the `{` of the shorthand form. Whatever GraphQL
+     * ignores ahead of that token (whitespace, commas, `#` comments) is skipped,
+     * so a mutation with a leading comment is not mistaken for a query. Anything
+     * else — a mutation, or a document opening with a fragment — is not retried.
+     */
+    private static function isQuery(string $query): bool
     {
-        return preg_match('/^\s*mutation\b/', $query) === 1;
+        $document = (string) preg_replace('/^(?:[\s,\x{FEFF}]+|#[^\r\n]*)+/u', '', $query);
+
+        return preg_match('/^(?:query\b|\{)/', $document) === 1;
     }
 
     /**
