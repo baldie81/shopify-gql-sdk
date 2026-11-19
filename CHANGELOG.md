@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-19
+
 ### Security
 
 - **The access token is no longer sent along on redirects.** The API client
@@ -411,7 +413,8 @@ silently** — read "Behaviour changes" before upgrading.
   collections, fulfillment orders, price lists, draft orders, gift cards,
   webhooks, metafields and definitions, translations, files and bulk operations.
 
-[Unreleased]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.6.2...HEAD
+[Unreleased]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.6.2...v1.7.0
 [1.6.2]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.5.0...v1.6.0
