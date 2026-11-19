@@ -76,6 +76,26 @@ final class CollectionsTest extends MockClientTestCase
         self::assertStringContainsString('collectionRemoveProducts', $this->body()['query']);
     }
 
+    public function testReorderProductsSendsPositionsAsStrings(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['collectionReorderProducts' => ['job' => ['id' => 'gid://shopify/Job/1', 'done' => false], 'userErrors' => []]],
+        ]))]);
+
+        $client->collections()->reorderProducts('9', [
+            ['id' => 'gid://shopify/Product/1', 'newPosition' => 0],
+            ['id' => 'gid://shopify/Product/2', 'newPosition' => '3'],
+        ]);
+
+        self::assertSame(
+            [
+                ['id' => 'gid://shopify/Product/1', 'newPosition' => '0'],
+                ['id' => 'gid://shopify/Product/2', 'newPosition' => '3'],
+            ],
+            $this->body()['variables']['moves'],
+        );
+    }
+
     public function testAddProductsSendsAtMost250IdsPerCall(): void
     {
         $ok     = static fn (): Response => new Response(200, [], (string) json_encode(['data' => ['collectionAddProducts' => ['collection' => ['id' => 'gid://shopify/Collection/9'], 'userErrors' => []]]]));

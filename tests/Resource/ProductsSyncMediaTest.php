@@ -31,6 +31,20 @@ final class ProductsSyncMediaTest extends MockClientTestCase
         self::assertSame('sku:"AB C:1 \\"x\\""', $this->body()['variables']['q']);
     }
 
+    public function testFindIdBySkuAcceptsTheIntegerKeyOfANumericSku(): void
+    {
+        $client = $this->altOnlyClient([new Response(200, [], (string) json_encode([
+            'data' => ['productVariants' => ['nodes' => [['product' => ['id' => 'gid://shopify/Product/55']]]]],
+        ]))]);
+
+        // What `foreach (MediaFolder::scan($dir) as $sku => $slots)` yields for "12345_1.jpg".
+        $sku = array_key_first(['12345' => true]);
+        self::assertIsInt($sku);
+
+        self::assertSame('gid://shopify/Product/55', $client->products()->findIdBySku($sku));
+        self::assertSame('sku:"12345"', $this->body()['variables']['q']);
+    }
+
     public function testFindIdBySkuReturnsNullWhenNoMatch(): void
     {
         $client = $this->altOnlyClient([new Response(200, [], (string) json_encode([

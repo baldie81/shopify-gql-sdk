@@ -164,6 +164,7 @@ final class Collections extends AbstractResource
     /**
      * Reorder products in a manual collection (asynchronous — returns a job).
      * Each move is `['id' => productGid, 'newPosition' => 0]` (zero-based).
+     * `newPosition` is sent as a string, as its `UnsignedInt64` type requires.
      *
      * @param list<array<string,mixed>> $moves
      * @return array{job:?array<string,mixed>,userErrors:list<array<string,mixed>>}
@@ -173,7 +174,15 @@ final class Collections extends AbstractResource
         $mutation = 'mutation ($id: ID!, $moves: [MoveInput!]!) {'
             . ' collectionReorderProducts(id: $id, moves: $moves) { job { id done } userErrors { field message } } }';
 
-        return $this->gql->execute($mutation, ['id' => Gid::collection($id), 'moves' => array_values($moves)])['collectionReorderProducts'] ?? ['job' => null, 'userErrors' => []];
+        $moves = array_map(static function (array $move): array {
+            if (isset($move['newPosition'])) {
+                $move['newPosition'] = (string) $move['newPosition'];
+            }
+
+            return $move;
+        }, array_values($moves));
+
+        return $this->gql->execute($mutation, ['id' => Gid::collection($id), 'moves' => $moves])['collectionReorderProducts'] ?? ['job' => null, 'userErrors' => []];
     }
 
     /**

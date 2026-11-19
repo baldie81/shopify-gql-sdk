@@ -309,9 +309,12 @@ final class Products extends AbstractResource
      *
      * @param list<array<string,mixed>> $inputs   CreateMediaInput payloads
      * @param list<string>              $knownIds media ids on the product before the call
+     * @param list<array<string,mixed>> $created  filled as each call returns, so a caller can still
+     *                                            record what exists when a later call throws
+     * @param-out list<array<mixed>> $created
      * @return array{media:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,mediaUserErrors:list<array<string,mixed>>}
      */
-    private function createMedia(string $gid, array $inputs, array $knownIds): array
+    private function createMedia(string $gid, array $inputs, array $knownIds, array &$created = []): array
     {
         $mutation = 'mutation ($product: ProductUpdateInput!, $media: [CreateMediaInput!], $first: Int!) {'
             . ' productUpdate(product: $product, media: $media) {'
@@ -332,7 +335,7 @@ final class Products extends AbstractResource
 
             $new = [];
             foreach ($result['product']['media']['nodes'] ?? [] as $node) {
-                if (isset($node['id']) && !isset($known[$node['id']])) {
+                if (is_array($node) && isset($node['id']) && !isset($known[$node['id']])) {
                     $new[]              = $node;
                     $known[$node['id']] = true;
                 }
@@ -394,7 +397,21 @@ final class Products extends AbstractResource
 
         $result = ['added' => [], 'skipped' => $skipped, 'mediaUserErrors' => [], 'keyStoreSaved' => true];
         if ($toAdd !== []) {
-            $created                   = $this->createMedia($gid, $toAdd, $state['ids']);
+            $createdNodes = [];
+            try {
+                $created = $this->createMedia($gid, $toAdd, $state['ids'], $createdNodes);
+            } catch (\Throwable $e) {
+                // A later chunk failed: record what the earlier ones created, so
+                // the next run doesn't add those files again.
+                foreach (self::pairCreated($toAdd, $createdNodes) as $index => $mediaId) {
+                    if ($addKeys[$index] !== '') {
+                        $known[$addKeys[$index]] = $mediaId;
+                    }
+                }
+                $this->saveMediaKeysQuietly($gid, $known, $state['loaded']);
+
+                throw $e;
+            }
             $result['added']           = $created['media'];
             $result['mediaUserErrors'] = $created['userErrors'];
 
@@ -518,13 +535,13 @@ final class Products extends AbstractResource
     private function saveMediaKeys(string $gid, array $map, array $loaded): ?array
     {
         $map[MediaKeyStore::OWNER_KEY] = $gid;
-        ksort($map);
+        ksort($map, SORT_STRING); // numeric keys ("123") are ints in PHP: compare all as strings
 
         $failures = [];
         foreach ($this->keyStores() as $index => $store) {
             $current = $loaded[$index] ?? null;
             if ($current !== null) {
-                ksort($current);
+                ksort($current, SORT_STRING);
                 if ($current === $map) {
                     continue; // already up to date: no write
                 }
@@ -540,6 +557,22 @@ final class Products extends AbstractResource
         return $failures === []
             ? null
             : ['field' => null, 'message' => implode(' | ', $failures), 'code' => 'MEDIA_KEY_STORE_FAILED'];
+    }
+
+    /**
+     * Save the key map on the way out of a failed call. The failure being
+     * reported is the caller's exception, so nothing from the save is surfaced.
+     *
+     * @param array<string,string>             $map
+     * @param list<array<string,string>|null>  $loaded
+     */
+    private function saveMediaKeysQuietly(string $gid, array $map, array $loaded): void
+    {
+        try {
+            $this->saveMediaKeys($gid, $map, $loaded);
+        } catch (\Throwable) {
+            // a store that throws something of its own must not mask the original failure
+        }
     }
 
     /**
@@ -691,9 +724,14 @@ final class Products extends AbstractResource
 
     /**
      * Resolve a product id from one of its variant SKUs (null if none match).
+     * An integer is accepted because PHP turns numeric array keys into integers,
+     * which is what {@see \Baldie81\ShopifyGraphQL\Support\MediaFolder::scan()}
+     * yields for an all-digit SKU.
      */
-    public function findIdBySku(string $sku): ?string
+    public function findIdBySku(int|string $sku): ?string
     {
+        $sku = (string) $sku;
+
         $query = 'query ($q: String!) { productVariants(first: 1, query: $q) { nodes { product { id } } } }';
         // Quoted, so SKUs containing spaces, colons or quotes match exactly
         // instead of being parsed as search syntax.
@@ -793,6 +831,10 @@ final class Products extends AbstractResource
      * returns: `keyStoreSaved` is false and the reason is in `userErrors`.
      * Persist `media` and sync again to repair it.
      *
+     * If a request fails with an exception after images were created, the key
+     * map is saved before the exception is rethrown, so syncing again picks up
+     * where it stopped rather than creating those images a second time.
+     *
      * @param list<MediaEntry> $slots
      * @return array{media:list<array{key:string,id:string,action:string}>,created:list<string>,replaced:list<string>,pruned:list<string>,adopted:list<string>,orderedIds:list<string>,reorder:array<string,mixed>,keyStoreSaved:bool,userErrors:list<array<string,mixed>>}
      * @throws MediaKeyStoreException    when no key store can be read (nothing is changed)
@@ -874,61 +916,74 @@ final class Products extends AbstractResource
             }
         }
 
-        $created = [];
-        if ($createInputs !== []) {
-            $result = $this->createMedia($gid, $createInputs, $knownIds);
-            foreach ($result['userErrors'] as $error) {
-                $userErrors[] = $error;
-            }
-            foreach (self::pairCreated($createInputs, $result['media']) as $index => $mediaId) {
-                $key            = $createKeys[$index];
-                $existing[$key] = $mediaId;
-                $created[]      = $key;
-                $action[$key]   = 'created';
-            }
-        }
-
-        // Final order, in slot position order, using the (now-known) media ids.
-        // `media` pairs each slot key with its media id and the action taken, so
-        // the caller can persist the gid per slot.
-        $orderedIds = [];
-        $media      = [];
-        foreach ($slots as $slot) {
-            $key = $slot->key();
-            if (isset($existing[$key])) {
-                $orderedIds[] = $existing[$key];
-                $media[]      = ['key' => $key, 'id' => $existing[$key], 'action' => $action[$key] ?? 'unchanged'];
-            }
-        }
-
-        $reorder = ['job' => null, 'mediaUserErrors' => []];
-        if (count($orderedIds) > 1) {
-            $reorder = $this->reorderMedia($gid, $orderedIds);
-            foreach ($reorder['mediaUserErrors'] ?? [] as $error) {
-                $userErrors[] = $error;
-            }
-        }
-
-        // Mirror mode: remove tracked media that the slots didn't cover.
-        $pruned = [];
-        if ($prune) {
-            $incoming = [];
-            foreach ($slots as $slot) {
-                $incoming[$slot->key()] = true;
-            }
-            $orphanIds = [];
-            foreach ($existing as $key => $mediaId) {
-                if (!isset($incoming[$key])) {
-                    $orphanIds[] = $mediaId;
+        // From here on new media may exist on the product. If a later request
+        // throws (a timed-out mutation is never retried), the map is still saved
+        // so the next sync recognises what was created instead of adding it again.
+        $created      = [];
+        $createdNodes = [];
+        try {
+            if ($createInputs !== []) {
+                $result = $this->createMedia($gid, $createInputs, $knownIds, $createdNodes);
+                foreach ($result['userErrors'] as $error) {
+                    $userErrors[] = $error;
+                }
+                foreach (self::pairCreated($createInputs, $result['media']) as $index => $mediaId) {
+                    $key            = $createKeys[$index];
+                    $existing[$key] = $mediaId;
+                    $created[]      = $key;
+                    $action[$key]   = 'created';
                 }
             }
-            if ($orphanIds !== []) {
-                $deleted = $this->deleteMedia($gid, $orphanIds);
-                $pruned  = $deleted['deletedMediaIds'] ?? [];
-                foreach ($deleted['mediaUserErrors'] ?? [] as $error) {
+
+            // Final order, in slot position order, using the (now-known) media ids.
+            // `media` pairs each slot key with its media id and the action taken, so
+            // the caller can persist the gid per slot.
+            $orderedIds = [];
+            $media      = [];
+            foreach ($slots as $slot) {
+                $key = $slot->key();
+                if (isset($existing[$key])) {
+                    $orderedIds[] = $existing[$key];
+                    $media[]      = ['key' => $key, 'id' => $existing[$key], 'action' => $action[$key] ?? 'unchanged'];
+                }
+            }
+
+            $reorder = ['job' => null, 'mediaUserErrors' => []];
+            if (count($orderedIds) > 1) {
+                $reorder = $this->reorderMedia($gid, $orderedIds);
+                foreach ($reorder['mediaUserErrors'] ?? [] as $error) {
                     $userErrors[] = $error;
                 }
             }
+
+            // Mirror mode: remove tracked media that the slots didn't cover.
+            $pruned = [];
+            if ($prune) {
+                $incoming = [];
+                foreach ($slots as $slot) {
+                    $incoming[$slot->key()] = true;
+                }
+                $orphanIds = [];
+                foreach ($existing as $key => $mediaId) {
+                    if (!isset($incoming[$key])) {
+                        $orphanIds[] = $mediaId;
+                    }
+                }
+                if ($orphanIds !== []) {
+                    $deleted = $this->deleteMedia($gid, $orphanIds);
+                    $pruned  = $deleted['deletedMediaIds'] ?? [];
+                    foreach ($deleted['mediaUserErrors'] ?? [] as $error) {
+                        $userErrors[] = $error;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            foreach (self::pairCreated($createInputs, $createdNodes) as $index => $mediaId) {
+                $existing[$createKeys[$index]] = $mediaId;
+            }
+            $this->saveMediaKeysQuietly($gid, $existing, $state['loaded']);
+
+            throw $e;
         }
 
         // Remember what is on the product now (minus anything just removed).

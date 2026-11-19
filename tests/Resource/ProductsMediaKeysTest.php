@@ -12,6 +12,9 @@ use Baldie81\ShopifyGraphQL\MediaKeys\MediaKeyStore;
 use Baldie81\ShopifyGraphQL\MediaKeys\MetafieldMediaKeyStore;
 use Baldie81\ShopifyGraphQL\Support\Media;
 use Baldie81\ShopifyGraphQL\Support\MediaEntry;
+use Baldie81\ShopifyGraphQL\Exception\TransportException;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Psr7\Request;
 use Baldie81\ShopifyGraphQL\Tests\MockClientTestCase;
 
 /**
@@ -423,6 +426,108 @@ final class ProductsMediaKeysTest extends MockClientTestCase
         self::assertSame('gid://shopify/MediaImage/1', $result['media'][0]['id']); // still there to persist
         self::assertSame('MEDIA_KEY_STORE_FAILED', $result['userErrors'][0]['code']);
         self::assertStringContainsString('Access denied', $result['userErrors'][0]['message']);
+    }
+
+    public function testTheMapIsSavedWhenARequestFailsAfterMediaWasCreated(): void
+    {
+        $client = $this->mockClient([
+            self::media([['id' => 'gid://shopify/MediaImage/1', 'alt' => 'A_1.jpg']], ['A_1.jpg' => 'gid://shopify/MediaImage/1']),
+            self::replaced(),
+            self::created([['id' => 'gid://shopify/MediaImage/2', 'alt' => 'A_2.jpg']]),
+            // the reorder times out; a mutation is never retried
+            new ConnectException('timed out', new Request('POST', 'graphql.json')),
+            self::saved(),
+        ]);
+
+        try {
+            $client->products()->syncMedia('55', [
+                MediaEntry::url(1, 'https://cdn.test/A_1.jpg'),
+                MediaEntry::url(2, 'https://cdn.test/A_2.jpg'),
+            ]);
+            self::fail('The reorder failure should have been rethrown.');
+        } catch (TransportException $e) {
+            self::assertStringContainsString('timed out', $e->getMessage());
+        }
+
+        // The new image is on record, so the next sync replaces it instead of adding it again.
+        self::assertCount(5, $this->history);
+        self::assertSame(
+            ['A_1.jpg' => 'gid://shopify/MediaImage/1', 'A_2.jpg' => 'gid://shopify/MediaImage/2'],
+            $this->savedMap(4),
+        );
+    }
+
+    public function testAFailedMapSaveDoesNotMaskTheOriginalFailure(): void
+    {
+        $client = $this->mockClient([
+            self::media([['id' => 'gid://shopify/MediaImage/1', 'alt' => 'A_1.jpg']], ['A_1.jpg' => 'gid://shopify/MediaImage/1']),
+            self::replaced(),
+            self::created([['id' => 'gid://shopify/MediaImage/2', 'alt' => 'A_2.jpg']]),
+            new ConnectException('reorder timed out', new Request('POST', 'graphql.json')),
+            new ConnectException('save timed out', new Request('POST', 'graphql.json')),
+        ]);
+
+        $this->expectException(TransportException::class);
+        $this->expectExceptionMessage('reorder timed out');
+
+        $client->products()->syncMedia('55', [
+            MediaEntry::url(1, 'https://cdn.test/A_1.jpg'),
+            MediaEntry::url(2, 'https://cdn.test/A_2.jpg'),
+        ]);
+    }
+
+    public function testEnsureMediaRecordsEarlierChunksWhenALaterOneFails(): void
+    {
+        $media   = [];
+        $created = [];
+        for ($i = 1; $i <= 251; $i++) {
+            $media[] = Media::image("https://cdn.test/{$i}.jpg", key: "k{$i}");
+            if ($i <= 250) {
+                array_unshift($created, ['id' => "gid://shopify/MediaImage/{$i}", 'alt' => "k{$i}"]); // newest first
+            }
+        }
+
+        $client = $this->mockClient([
+            self::media([], []),
+            self::created($created),
+            new ConnectException('timed out', new Request('POST', 'graphql.json')),
+            self::saved(),
+        ]);
+
+        try {
+            $client->products()->ensureMedia('55', $media);
+            self::fail('The failure of the second chunk should have been rethrown.');
+        } catch (TransportException) {
+        }
+
+        $map = $this->savedMap(3);
+        self::assertCount(250, $map);
+        self::assertSame('gid://shopify/MediaImage/7', $map['k7']);
+        self::assertArrayNotHasKey('k251', $map);
+    }
+
+    public function testAnUnchangedMapWithNumericKeysIsNotRewritten(): void
+    {
+        // Numeric keys ("9") become PHP integers. Sorted alongside other keys
+        // with the default flags, the result depends on the order the entries
+        // arrive in, which made an unchanged map stored in this order look changed.
+        $stored = [
+            '9'                      => 'gid://shopify/MediaImage/1',
+            '1a'                     => 'gid://shopify/MediaImage/2',
+            MediaKeyStore::OWNER_KEY => self::PRODUCT,
+            '10'                     => 'gid://shopify/MediaImage/3',
+            'a'                      => 'gid://shopify/MediaImage/4',
+        ];
+        $nodes = [];
+        foreach ([1, 2, 3, 4] as $n) {
+            $nodes[] = ['id' => "gid://shopify/MediaImage/{$n}", 'alt' => 'x'];
+        }
+
+        $client = $this->mockClient([self::media($nodes, $stored, owner: null)]);
+        $result = $client->products()->ensureMedia('55', []);
+
+        self::assertTrue($result['keyStoreSaved']);
+        self::assertCount(1, $this->history); // the read only: nothing to write
     }
 
     public function testEnsureMediaSkipsByMapAndRecordsWhatItAdds(): void

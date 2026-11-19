@@ -28,7 +28,9 @@ final class MediaFolder
 
     /**
      * @param list<string> $extensions
-     * @return array<string,list<MediaEntry>> sku => slots, ordered by position
+     * @return array<int|string,list<MediaEntry>> sku => slots, ordered by position; an all-digit
+     *                                              SKU comes back as an integer key (PHP array
+     *                                              semantics), so cast it where a string is required
      */
     public static function scan(string $dir, array $extensions = self::DEFAULT_EXTENSIONS): array
     {

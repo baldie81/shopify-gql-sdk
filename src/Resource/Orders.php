@@ -57,6 +57,10 @@ final class Orders extends AbstractResource
      * Fulfill an order's open fulfillment orders (all line items), optionally with
      * tracking. `$tracking` is `['number' => …, 'company' => …, 'url' => …]`.
      *
+     * Only `OPEN` and `IN_PROGRESS` fulfillment orders are fulfilled. `SCHEDULED`
+     * ones (later deliveries of a subscription or pre-order) aren't due yet and
+     * are left alone, as are those on hold.
+     *
      * Shopify only accepts fulfillment orders assigned to the same location in
      * one `fulfillmentCreate`, so an order split across locations is fulfilled
      * with one call per location (each carrying the same tracking). Every
@@ -77,7 +81,7 @@ final class Orders extends AbstractResource
         // One fulfillment per assigned location, in the order the locations appear.
         $byLocation = [];
         foreach ($nodes as $fo) {
-            if (in_array($fo['status'] ?? '', ['OPEN', 'IN_PROGRESS', 'SCHEDULED'], true)) {
+            if (in_array($fo['status'] ?? '', ['OPEN', 'IN_PROGRESS'], true)) {
                 $location                = (string) ($fo['assignedLocation']['location']['id'] ?? '');
                 $byLocation[$location][] = ['fulfillmentOrderId' => $fo['id']];
             }

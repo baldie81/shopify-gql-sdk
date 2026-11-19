@@ -6,6 +6,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`syncMedia()` / `ensureMedia()` no longer forget images they created when
+  a later request fails.** The key map was written only at the very end, so an
+  exception after the images were created — a reorder or prune that timed out,
+  say, since mutations are never retried — left them unrecorded, and the next
+  sync of a product that already had a map created them again. The map is now
+  saved before the exception is rethrown.
+- **`orders()->fulfill()` leaves `SCHEDULED` fulfillment orders alone.** They
+  aren't due yet (later deliveries of a subscription or pre-order); including
+  them made Shopify reject the fulfillment of the open ones at the same
+  location, or fulfilled future deliveries early. Only `OPEN` and `IN_PROGRESS`
+  fulfillment orders are fulfilled.
+- **`products()->findIdBySku()` accepts an integer.** PHP turns an all-digit
+  array key into an integer, so the documented
+  `foreach (MediaFolder::scan($dir) as $sku => $slots)` loop threw a
+  `TypeError` under `strict_types` for numeric SKUs.
+- **`collections()->reorderProducts()` sends `newPosition` as a string**, as
+  its `UnsignedInt64` type requires — an integer, as the method's own example
+  showed, is now converted.
+- A media key map mixing numeric and non-numeric keys is no longer rewritten
+  when nothing changed.
+
 ## [1.6.1] - 2026-11-19
 
 ### Fixed

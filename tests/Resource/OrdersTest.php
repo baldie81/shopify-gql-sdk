@@ -59,6 +59,29 @@ final class OrdersTest extends MockClientTestCase
         self::assertSame('1Z999', $fulfillment['trackingInfo']['number']);
     }
 
+    public function testFulfillLeavesScheduledFulfillmentOrdersAlone(): void
+    {
+        $location = ['location' => ['id' => 'gid://shopify/Location/1']];
+        $client   = $this->mockClient([
+            // a prepaid subscription: this delivery is open, the later ones are scheduled
+            new Response(200, [], (string) json_encode(['data' => ['order' => ['fulfillmentOrders' => ['nodes' => [
+                ['id' => 'gid://shopify/FulfillmentOrder/1', 'status' => 'OPEN', 'assignedLocation' => $location],
+                ['id' => 'gid://shopify/FulfillmentOrder/2', 'status' => 'SCHEDULED', 'assignedLocation' => $location],
+                ['id' => 'gid://shopify/FulfillmentOrder/3', 'status' => 'ON_HOLD', 'assignedLocation' => $location],
+            ]]]]])),
+            new Response(200, [], (string) json_encode(['data' => ['fulfillmentCreate' => [
+                'fulfillment' => ['id' => 'gid://shopify/Fulfillment/9', 'status' => 'SUCCESS'], 'userErrors' => [],
+            ]]])),
+        ]);
+
+        $client->orders()->fulfill('7');
+
+        self::assertSame(
+            [['fulfillmentOrderId' => 'gid://shopify/FulfillmentOrder/1']],
+            $this->body(1)['variables']['fulfillment']['lineItemsByFulfillmentOrder'],
+        );
+    }
+
     public function testFulfillCreatesOneFulfillmentPerAssignedLocation(): void
     {
         // fulfillmentCreate only accepts fulfillment orders assigned to the same location.
