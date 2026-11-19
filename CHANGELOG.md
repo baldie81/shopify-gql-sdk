@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-19
+
 ### Fixed
 
 - **`syncMedia(prune: true)` no longer removes a merchant's own images from a
@@ -243,7 +245,8 @@ silently** — read "Behaviour changes" before upgrading.
   collections, fulfillment orders, price lists, draft orders, gift cards,
   webhooks, metafields and definitions, translations, files and bulk operations.
 
-[Unreleased]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.2.0...v1.3.0
