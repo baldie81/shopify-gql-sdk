@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-11-19
+
 ### Fixed
 
 - **`syncMedia()` / `ensureMedia()` no longer forget images they created when
@@ -333,7 +335,8 @@ silently** — read "Behaviour changes" before upgrading.
   collections, fulfillment orders, price lists, draft orders, gift cards,
   webhooks, metafields and definitions, translations, files and bulk operations.
 
-[Unreleased]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.6.2...HEAD
+[1.6.2]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/baldie81/shopify-gql-sdk/compare/v1.4.1...v1.5.0
