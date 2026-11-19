@@ -23,6 +23,9 @@ final class Collections extends AbstractResource
 {
     private const FIELDS = 'id legacyResourceId title handle sortOrder updatedAt';
 
+    /** Shopify accepts at most 250 product ids per add/remove call. */
+    private const int MAX_PRODUCTS = 250;
+
     /**
      * @return array<string,mixed>|null
      */
@@ -90,7 +93,8 @@ final class Collections extends AbstractResource
     }
 
     /**
-     * Add products to a manual collection (synchronous).
+     * Add products to a manual collection (synchronous). Chunked at
+     * {@see MAX_PRODUCTS} ids per call.
      *
      * @param list<string> $productIds
      * @return array{collection:?array<string,mixed>,userErrors:list<array<string,mixed>>}
@@ -100,27 +104,61 @@ final class Collections extends AbstractResource
         $mutation = 'mutation ($id: ID!, $productIds: [ID!]!) {'
             . ' collectionAddProducts(id: $id, productIds: $productIds) { collection { id } userErrors { field message } } }';
 
-        return $this->gql->execute($mutation, [
-            'id'         => Gid::collection($id),
-            'productIds' => array_values(array_map(static fn (int|string $p): string => Gid::product($p), $productIds)),
-        ])['collectionAddProducts'] ?? ['collection' => null, 'userErrors' => []];
+        $merged = ['collection' => null, 'userErrors' => []];
+        foreach ($this->productIdChunks($productIds) as $chunk) {
+            $result = $this->gql->execute($mutation, ['id' => Gid::collection($id), 'productIds' => $chunk])['collectionAddProducts'] ?? [];
+            if (isset($result['collection'])) {
+                $merged['collection'] = $result['collection'];
+            }
+            foreach ($result['userErrors'] ?? [] as $error) {
+                $merged['userErrors'][] = $error;
+            }
+        }
+
+        return $merged;
     }
 
     /**
      * Remove products from a manual collection (asynchronous — returns a job).
+     * Chunked at {@see MAX_PRODUCTS} ids per call, each call starting its own
+     * job: `jobs` lists them all and `job` is the last one, so with more than
+     * {@see MAX_PRODUCTS} ids poll every entry of `jobs`.
      *
      * @param list<string> $productIds
-     * @return array{job:?array<string,mixed>,userErrors:list<array<string,mixed>>}
+     * @return array{job:?array<string,mixed>,jobs:list<array<string,mixed>>,userErrors:list<array<string,mixed>>}
      */
     public function removeProducts(string $id, array $productIds): array
     {
         $mutation = 'mutation ($id: ID!, $productIds: [ID!]!) {'
             . ' collectionRemoveProducts(id: $id, productIds: $productIds) { job { id done } userErrors { field message } } }';
 
-        return $this->gql->execute($mutation, [
-            'id'         => Gid::collection($id),
-            'productIds' => array_values(array_map(static fn (int|string $p): string => Gid::product($p), $productIds)),
-        ])['collectionRemoveProducts'] ?? ['job' => null, 'userErrors' => []];
+        $merged = ['job' => null, 'jobs' => [], 'userErrors' => []];
+        foreach ($this->productIdChunks($productIds) as $chunk) {
+            $result = $this->gql->execute($mutation, ['id' => Gid::collection($id), 'productIds' => $chunk])['collectionRemoveProducts'] ?? [];
+            if (isset($result['job'])) {
+                $merged['job']    = $result['job'];
+                $merged['jobs'][] = $result['job'];
+            }
+            foreach ($result['userErrors'] ?? [] as $error) {
+                $merged['userErrors'][] = $error;
+            }
+        }
+
+        return $merged;
+    }
+
+    /**
+     * Product GIDs in chunks of {@see MAX_PRODUCTS}. An empty list is still one
+     * (empty) chunk, so Shopify's own validation answers it.
+     *
+     * @param array<int|string> $productIds
+     * @return list<list<string>>
+     */
+    private function productIdChunks(array $productIds): array
+    {
+        $gids = array_values(array_map(static fn (int|string $p): string => Gid::product($p), $productIds));
+
+        return $gids === [] ? [[]] : array_chunk($gids, self::MAX_PRODUCTS);
     }
 
     /**

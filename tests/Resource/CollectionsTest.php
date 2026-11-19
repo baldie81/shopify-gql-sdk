@@ -75,4 +75,29 @@ final class CollectionsTest extends MockClientTestCase
         self::assertFalse($result['job']['done']);
         self::assertStringContainsString('collectionRemoveProducts', $this->body()['query']);
     }
+
+    public function testAddProductsSendsAtMost250IdsPerCall(): void
+    {
+        $ok     = static fn (): Response => new Response(200, [], (string) json_encode(['data' => ['collectionAddProducts' => ['collection' => ['id' => 'gid://shopify/Collection/9'], 'userErrors' => []]]]));
+        $client = $this->mockClient([$ok(), $ok()]);
+
+        $result = $client->collections()->addProducts('9', range(1, 251));
+
+        self::assertCount(2, $this->history);
+        self::assertCount(250, $this->body(0)['variables']['productIds']);
+        self::assertSame(['gid://shopify/Product/251'], $this->body(1)['variables']['productIds']);
+        self::assertSame('gid://shopify/Collection/9', $result['collection']['id']);
+    }
+
+    public function testRemoveProductsReturnsEveryJobWhenChunked(): void
+    {
+        $job    = static fn (int $id): Response => new Response(200, [], (string) json_encode(['data' => ['collectionRemoveProducts' => ['job' => ['id' => "gid://shopify/Job/{$id}", 'done' => false], 'userErrors' => []]]]));
+        $client = $this->mockClient([$job(1), $job(2)]);
+
+        $result = $client->collections()->removeProducts('9', range(1, 300));
+
+        self::assertCount(50, $this->body(1)['variables']['productIds']);
+        self::assertSame(['gid://shopify/Job/1', 'gid://shopify/Job/2'], array_column($result['jobs'], 'id'));
+        self::assertSame('gid://shopify/Job/2', $result['job']['id']);
+    }
 }

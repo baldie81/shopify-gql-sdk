@@ -6,6 +6,45 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Queries are retried after a connection failure or timeout**, like they
+  already were after a 502/503/504 (up to `maxRetries`, waiting 1s, 2s, …).
+  Mutations still are not. A query that keeps timing out therefore takes up to
+  `maxRetries + 1` timeouts to fail; set `maxRetries: 0` to opt out.
+- **`syncMedia()` throws `InvalidArgumentException` when two slots share a
+  key**, before changing anything. It used to create both images and track
+  only one.
+- **`products()->delete()` drops the product's media key map** from the key
+  store (a `JsonFileMediaKeyStore` file, or your own store's row). If that
+  fails the product is still deleted and the reason is added to `userErrors`
+  with the code `MEDIA_KEY_STORE_FAILED`.
+- **`translations()->register()` skips inputs whose key isn't translatable** on
+  the resource and returns their keys in `skipped`, as `set()` does. They used
+  to be sent without a digest, which Shopify rejects with a thrown error.
+- **Large inputs are chunked** in `collections()->addProducts()` /
+  `removeProducts()` (250 ids per call), `priceLists()->updatePrices()` /
+  `deletePrices()` (250 per call), `translations()->register()` / `set()` (100
+  per call), and media creation (250 per call). `removeProducts()` returns
+  every job it started under a new `jobs` key; `job` is the last one.
+
+### Fixed
+
+- `files()->upload()` / `uploadMany()` / `stageJsonl()` throw `UploadException`
+  when the storage host answers with a non-2xx status and the injected
+  uploader has `http_errors` off; the failure used to pass as a success.
+- `bulkOperations()->results()` throws `TransportException` for a non-2xx
+  download and for a download that breaks part-way, instead of parsing an
+  error body as rows or leaking a Guzzle exception.
+
+### Added
+
+- `products()->set()` and `fulfillmentOrders()->get()` select
+  `pageInfo { hasNextPage }` on their `variants` (first 100) and `lineItems`
+  (first 50), so a truncated list can be told from a complete one.
+- `Configuration::DEFAULT_API_VERSION`, now the single place the default API
+  version is defined (`ShopifyClient::DEFAULT_API_VERSION` points to it).
+
 ## [1.5.0] - 2026-11-19
 
 ### Fixed

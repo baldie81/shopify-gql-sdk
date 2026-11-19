@@ -66,4 +66,40 @@ final class PriceListsTest extends MockClientTestCase
 
         self::assertSame('gid://shopify/PriceList/1', $result['deletedId']);
     }
+
+    public function testUpdatePricesSendsAtMost250OfEachPerCallAndMergesTheResults(): void
+    {
+        $reply = static fn (array $added, array $deleted): Response => new Response(200, [], (string) json_encode(['data' => ['priceListFixedPricesUpdate' => [
+            'priceList' => ['id' => 'gid://shopify/PriceList/3'], 'pricesAdded' => $added, 'deletedFixedPriceVariantIds' => $deleted, 'userErrors' => [],
+        ]]]));
+        $client = $this->mockClient([
+            $reply([['variant' => ['id' => 'gid://shopify/ProductVariant/1']]], ['gid://shopify/ProductVariant/900']),
+            $reply([['variant' => ['id' => 'gid://shopify/ProductVariant/251']]], []),
+        ]);
+
+        $prices = array_map(static fn (int $i): array => ['variantId' => (string) $i, 'price' => ['amount' => '1.00', 'currencyCode' => 'EUR']], range(1, 251));
+        $result = $client->priceLists()->updatePrices('3', $prices, ['900']);
+
+        self::assertCount(2, $this->history);
+        self::assertCount(250, $this->body(0)['variables']['pricesToAdd']);
+        self::assertSame(['gid://shopify/ProductVariant/900'], $this->body(0)['variables']['variantIdsToDelete']);
+        self::assertCount(1, $this->body(1)['variables']['pricesToAdd']);
+        self::assertSame([], $this->body(1)['variables']['variantIdsToDelete']);
+
+        self::assertCount(2, $result['pricesAdded']);
+        self::assertSame(['gid://shopify/ProductVariant/900'], $result['deletedFixedPriceVariantIds']);
+        self::assertSame('gid://shopify/PriceList/3', $result['priceList']['id']);
+    }
+
+    public function testDeletePricesChunks(): void
+    {
+        $reply  = static fn (): Response => new Response(200, [], (string) json_encode(['data' => ['priceListFixedPricesDelete' => ['deletedFixedPriceVariantIds' => ['x'], 'userErrors' => []]]]));
+        $client = $this->mockClient([$reply(), $reply()]);
+
+        $result = $client->priceLists()->deletePrices('3', range(1, 251));
+
+        self::assertCount(250, $this->body(0)['variables']['variantIds']);
+        self::assertCount(1, $this->body(1)['variables']['variantIds']);
+        self::assertCount(2, $result['deletedFixedPriceVariantIds']);
+    }
 }

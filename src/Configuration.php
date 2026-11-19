@@ -15,6 +15,9 @@ namespace Baldie81\ShopifyGraphQL;
  */
 final class Configuration
 {
+    /** The Admin API version used when none is given. */
+    public const string DEFAULT_API_VERSION = '2026-10';
+
     private readonly string $host;
 
     /**
@@ -27,7 +30,7 @@ final class Configuration
         public readonly string $shop,
         #[\SensitiveParameter]
         public readonly string $accessToken,
-        public readonly string $apiVersion = '2026-10',
+        public readonly string $apiVersion = self::DEFAULT_API_VERSION,
         public readonly float $timeout = 30.0,
         public readonly float $connectTimeout = 10.0,
         public readonly bool $verifySsl = true,

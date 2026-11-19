@@ -22,6 +22,9 @@ use Baldie81\ShopifyGraphQL\Support\Translation;
  */
 final class Translations extends AbstractResource
 {
+    /** Translations sent per `translationsRegister` call. */
+    private const int MAX_TRANSLATIONS = 100;
+
     /**
      * The resource's translatable content: each entry has `key`, `value`,
      * `digest`, and `locale` (the source locale).
@@ -99,10 +102,12 @@ final class Translations extends AbstractResource
     /**
      * Register translations from {@see Translation} builders or raw arrays. Any
      * input missing `translatableContentDigest` is filled from the resource's
-     * current content before sending.
+     * current content before sending. An input whose key isn't translatable on
+     * the resource has no digest to fill in; it is left out and its key returned
+     * in `skipped`, as {@see set()} does.
      *
      * @param list<Translation|array<string,mixed>> $translations
-     * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,digests:array<string,string>}
+     * @return array{translations:list<array<string,mixed>>,userErrors:list<array<string,mixed>>,digests:array<string,string>,skipped:list<string>}
      */
     public function register(string $resourceId, array $translations): array
     {
@@ -126,7 +131,22 @@ final class Translations extends AbstractResource
             unset($input);
         }
 
-        return $this->runRegister($resourceId, $inputs);
+        $ready   = [];
+        $skipped = [];
+        foreach ($inputs as $input) {
+            if (isset($input['translatableContentDigest'])) {
+                $ready[] = $input;
+            } else {
+                $skipped[] = (string) ($input['key'] ?? '');
+            }
+        }
+
+        $result = $ready === []
+            ? ['translations' => [], 'userErrors' => [], 'digests' => []]
+            : $this->runRegister($resourceId, $ready);
+        $result['skipped'] = array_values(array_unique($skipped));
+
+        return $result;
     }
 
     /**
@@ -166,8 +186,15 @@ final class Translations extends AbstractResource
             . ' translationsRegister(resourceId: $resourceId, translations: $translations) {'
             . ' translations { locale key value updatedAt } userErrors { field message } } }';
 
-        $data   = $this->gql->execute($mutation, ['resourceId' => $resourceId, 'translations' => array_values($inputs)]);
-        $result = $data['translationsRegister'] ?? ['translations' => [], 'userErrors' => []];
+        $result = ['translations' => [], 'userErrors' => []];
+        foreach (array_chunk(array_values($inputs), self::MAX_TRANSLATIONS) as $chunk) {
+            $data = $this->gql->execute($mutation, ['resourceId' => $resourceId, 'translations' => $chunk])['translationsRegister'] ?? [];
+            foreach (['translations', 'userErrors'] as $list) {
+                foreach ($data[$list] ?? [] as $entry) {
+                    $result[$list][] = $entry;
+                }
+            }
+        }
 
         // Surface the digest each translation was registered against, so callers
         // can persist it (e.g. to detect "outdated" translations later).
@@ -177,7 +204,7 @@ final class Translations extends AbstractResource
                 $digestByKey[(string) $input['key']] = (string) ($input['translatableContentDigest'] ?? '');
             }
         }
-        foreach ($result['translations'] ?? [] as &$translation) {
+        foreach ($result['translations'] as &$translation) {
             $key = $translation['key'] ?? null;
             if ($key !== null && isset($digestByKey[$key])) {
                 $translation['translatableContentDigest'] = $digestByKey[$key];

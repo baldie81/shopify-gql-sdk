@@ -52,6 +52,9 @@ final class BulkOperations extends AbstractResource
      * nothing if that url isn't set yet (e.g. not COMPLETED). Streamed, so it
      * handles large result files without loading them all into memory.
      *
+     * A failed or interrupted download throws a {@see TransportException} — also
+     * part-way through, after some rows were already yielded.
+     *
      * Each row is the decoded JSON object from one line — for a bulk *mutation*
      * that's your mutation's payload (so select `id`/`userErrors` to get them).
      *
@@ -66,14 +69,29 @@ final class BulkOperations extends AbstractResource
         }
 
         try {
-            $body = $this->downloader->request('GET', $url, ['stream' => true])->getBody();
+            $response = $this->downloader->request('GET', $url, ['stream' => true]);
         } catch (\Throwable $e) {
             throw new TransportException('Failed to download bulk result: ' . $e->getMessage(), 0, $e);
         }
 
+        // An injected client may have `http_errors` off, so check the status too.
+        $status = $response->getStatusCode();
+        if ($status < 200 || $status >= 300) {
+            throw new TransportException("Failed to download bulk result: the storage host answered HTTP {$status}.");
+        }
+
+        $body   = $response->getBody();
         $buffer = '';
-        while (!$body->eof()) {
-            $buffer .= $body->read(65536);
+        while (true) {
+            try {
+                if ($body->eof()) {
+                    break;
+                }
+                $buffer .= $body->read(65536);
+            } catch (\RuntimeException $e) {
+                // The connection dropped mid-download: rows already yielded are incomplete.
+                throw new TransportException('Bulk result download was interrupted: ' . $e->getMessage(), 0, $e);
+            }
             while (($newline = strpos($buffer, "\n")) !== false) {
                 $line   = trim(substr($buffer, 0, $newline));
                 $buffer = substr($buffer, $newline + 1);

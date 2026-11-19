@@ -21,6 +21,7 @@ use GraphQL\Validator\DocumentValidator;
 use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Response;
+use Baldie81\ShopifyGraphQL\Configuration;
 use Baldie81\ShopifyGraphQL\Enum\MetafieldType;
 use Baldie81\ShopifyGraphQL\Enum\WebhookTopic;
 use Baldie81\ShopifyGraphQL\ShopifyClient;
@@ -56,7 +57,7 @@ use Psr\Http\Message\RequestInterface;
  */
 final class SchemaValidationTest extends TestCase
 {
-    private const string VERSION = '2026-10';
+    private const string VERSION = Configuration::DEFAULT_API_VERSION;
 
     /**
      * Deprecated members the SDK still uses on purpose, as `Type.field`.

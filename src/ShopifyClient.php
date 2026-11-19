@@ -36,7 +36,7 @@ use Baldie81\ShopifyGraphQL\Resource\Webhooks;
  */
 final class ShopifyClient
 {
-    public const string DEFAULT_API_VERSION = '2026-10';
+    public const string DEFAULT_API_VERSION = Configuration::DEFAULT_API_VERSION;
 
     private ?Products $products = null;
     private ?BulkOperations $bulkOperations = null;

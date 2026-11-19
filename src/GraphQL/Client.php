@@ -6,6 +6,7 @@ namespace Baldie81\ShopifyGraphQL\GraphQL;
 
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
+use Baldie81\ShopifyGraphQL\Configuration;
 use Baldie81\ShopifyGraphQL\Exception\GraphQLException;
 use Baldie81\ShopifyGraphQL\Exception\ThrottledException;
 use Baldie81\ShopifyGraphQL\Exception\TransportException;
@@ -31,7 +32,7 @@ final class Client
         private readonly string $path = 'graphql.json',
         private readonly int $maxRetries = 2,
         ?callable $sleeper = null,
-        private readonly string $apiVersion = '2026-10',
+        private readonly string $apiVersion = Configuration::DEFAULT_API_VERSION,
     ) {
         $this->sleeper = $sleeper ?? static fn (int $microseconds) => usleep($microseconds);
     }
@@ -62,8 +63,9 @@ final class Client
      *
      * Retries (up to `maxRetries`, with backoff) when Shopify throttles the
      * request — a `THROTTLED` error in the body or an HTTP 429 — and, for
-     * *queries only*, on a transient 502/503/504. Mutations are never retried on
-     * a gateway error, since the write may already have been applied — and
+     * *queries only*, on a transient 502/503/504 or a connection failure/timeout.
+     * Mutations are never retried on either, since the write may already have
+     * been applied — and
      * neither is a document that isn't plainly a query (see {@see isQuery()}).
      *
      * @param array<string,mixed> $variables
@@ -75,7 +77,20 @@ final class Client
         $attempt = 0;
 
         while (true) {
-            $response = $this->send($query, $variables);
+            try {
+                $response = $this->send($query, $variables);
+            } catch (TransportException $e) {
+                // No response at all (connection failure, timeout). Re-sending a
+                // query is harmless; a mutation may have gone through.
+                if ($attempt < $this->maxRetries && self::isQuery($query)) {
+                    ($this->sleeper)(self::attemptBackoffMicros($attempt));
+                    $attempt++;
+                    continue;
+                }
+
+                throw $e;
+            }
+
             $status   = $response->getStatusCode();
             $body     = (string) $response->getBody();
             $canRetry = $attempt < $this->maxRetries;
@@ -213,11 +228,20 @@ final class Client
      */
     private function retryAfterMicros(ResponseInterface $response, int $attempt): int
     {
-        $header  = $response->getHeaderLine('Retry-After');
-        $seconds = is_numeric($header) ? (float) $header : (float) (2 ** $attempt);
-        $seconds = max(0.2, min($seconds, 10.0));
+        $header = $response->getHeaderLine('Retry-After');
+        if (!is_numeric($header)) {
+            return self::attemptBackoffMicros($attempt);
+        }
 
-        return (int) ceil($seconds * 1_000_000);
+        return (int) ceil(max(0.2, min((float) $header, 10.0)) * 1_000_000);
+    }
+
+    /**
+     * 1s, 2s, 4s… capped at 10s.
+     */
+    private static function attemptBackoffMicros(int $attempt): int
+    {
+        return (int) min(2 ** $attempt, 10) * 1_000_000;
     }
 
     /**

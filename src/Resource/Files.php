@@ -252,9 +252,15 @@ final class Files extends AbstractResource
         ];
 
         try {
-            $this->uploader->request('POST', (string) $target['url'], ['multipart' => $multipart]);
+            $response = $this->uploader->request('POST', (string) $target['url'], ['multipart' => $multipart]);
         } catch (\Throwable $e) {
             throw new UploadException("Pushing bytes for {$filename} failed: " . $e->getMessage(), 0, $e);
+        }
+
+        // An injected client may have `http_errors` off, so check the status too.
+        $status = $response->getStatusCode();
+        if ($status < 200 || $status >= 300) {
+            throw new UploadException("Pushing bytes for {$filename} failed: the storage host answered HTTP {$status}.");
         }
     }
 

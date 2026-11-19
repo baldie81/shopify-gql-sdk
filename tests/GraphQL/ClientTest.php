@@ -248,9 +248,31 @@ final class ClientTest extends TestCase
 
     public function testConnectFailureThrowsTransportException(): void
     {
-        $client = $this->client([new ConnectException('cannot connect', new Request('POST', 'graphql.json'))]);
+        $client = $this->client([new ConnectException('cannot connect', new Request('POST', 'graphql.json'))], maxRetries: 0);
 
         $this->expectException(TransportException::class);
-        $client->execute('query{...}');
+        $client->execute('query { x }');
+    }
+
+    public function testConnectFailureIsRetriedForQueries(): void
+    {
+        $failure = new ConnectException('cannot connect', new Request('POST', 'graphql.json'));
+        $client  = $this->client([$failure, $failure, new Response(200, [], (string) json_encode(['data' => ['ok' => true]]))]);
+
+        self::assertSame(['ok' => true], $client->execute('query { x }'));
+        self::assertSame([1_000_000, 2_000_000], $this->slept);
+    }
+
+    public function testConnectFailureIsNotRetriedForMutations(): void
+    {
+        // A timeout doesn't say whether the write went through.
+        $client = $this->client([new ConnectException('timed out', new Request('POST', 'graphql.json'))]);
+
+        try {
+            $client->execute('mutation { x }');
+            self::fail('expected TransportException');
+        } catch (TransportException) {
+            self::assertSame([], $this->slept);
+        }
     }
 }

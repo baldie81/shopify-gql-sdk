@@ -160,6 +160,10 @@ final class Products extends AbstractResource
      * Pass the raw input array (options as `productOptions`, variants with
      * `optionValues`/`price`/`inventoryItem.sku`). Returns `{ product, userErrors }`.
      *
+     * The returned product lists its first 100 variants; when
+     * `variants.pageInfo.hasNextPage` is true there are more — read them with
+     * {@see Variants::list()}.
+     *
      * @param array<string,mixed> $input a ProductSetInput
      * @return array{product:?array<string,mixed>,userErrors:list<array<string,mixed>>}
      */
@@ -168,13 +172,19 @@ final class Products extends AbstractResource
         $mutation = 'mutation ($input: ProductSetInput!) {'
             . ' productSet(input: $input) {'
             . ' product { ' . self::FIELDS . ' options { name optionValues { name } }'
-            . ' variants(first: 100) { nodes { id sku price } } } userErrors { field message } } }';
+            . ' variants(first: 100) { nodes { id sku price } pageInfo { hasNextPage } } } userErrors { field message } } }';
 
         return $this->gql->execute($mutation, ['input' => $input])['productSet'] ?? ['product' => null, 'userErrors' => []];
     }
 
     /**
      * Delete a product (`productDelete`). Returns the deleted product id.
+     *
+     * The product's media key map is dropped from the key store as well (the
+     * default metafield store needs nothing: the metafield goes with the
+     * product). If that fails the product is still deleted — `deletedProductId`
+     * is set — and the reason is added to `userErrors` with the code
+     * `MEDIA_KEY_STORE_FAILED`.
      *
      * @return array{deletedProductId:?string,userErrors:list<array<string,mixed>>}
      */
@@ -183,8 +193,25 @@ final class Products extends AbstractResource
         $mutation = 'mutation ($input: ProductDeleteInput!) {'
             . ' productDelete(input: $input) { deletedProductId userErrors { field message } } }';
 
-        return $this->gql->execute($mutation, ['input' => ['id' => Gid::product($id)]])['productDelete']
-            ?? ['deletedProductId' => null, 'userErrors' => []];
+        $gid    = Gid::product($id);
+        $result = $this->gql->execute($mutation, ['input' => ['id' => $gid]])['productDelete'] ?? [];
+        $result = ['deletedProductId' => $result['deletedProductId'] ?? null, 'userErrors' => $result['userErrors'] ?? []];
+
+        if ($result['deletedProductId'] !== null) {
+            foreach ($this->keyStores() as $store) {
+                if ($store instanceof MetafieldMediaKeyStore) {
+                    continue; // deleted along with the product
+                }
+
+                try {
+                    $store->forget($gid);
+                } catch (MediaKeyStoreException $e) {
+                    $result['userErrors'][] = ['field' => null, 'message' => $e->getMessage(), 'code' => 'MEDIA_KEY_STORE_FAILED'];
+                }
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -291,21 +318,32 @@ final class Products extends AbstractResource
             . ' product { id media(first: $first, sortKey: ID, reverse: true) { nodes { ' . self::MEDIA_FIELDS . ' } } }'
             . ' userErrors { field message } } }';
 
-        $result = $this->gql->execute($mutation, [
-            'product' => ['id' => $gid],
-            'media'   => $inputs,
-            'first'   => min(count($inputs), self::MAX_PAGE_SIZE),
-        ])['productUpdate'] ?? [];
+        $known      = array_flip($knownIds);
+        $created    = [];
+        $userErrors = [];
 
-        $known   = array_flip($knownIds);
-        $created = [];
-        foreach ($result['product']['media']['nodes'] ?? [] as $node) {
-            if (isset($node['id']) && !isset($known[$node['id']])) {
+        // A page of the payload must be able to hold everything one call created.
+        foreach (array_chunk($inputs, self::MAX_PAGE_SIZE) as $chunk) {
+            $result = $this->gql->execute($mutation, [
+                'product' => ['id' => $gid],
+                'media'   => $chunk,
+                'first'   => count($chunk),
+            ])['productUpdate'] ?? [];
+
+            $new = [];
+            foreach ($result['product']['media']['nodes'] ?? [] as $node) {
+                if (isset($node['id']) && !isset($known[$node['id']])) {
+                    $new[]              = $node;
+                    $known[$node['id']] = true;
+                }
+            }
+            foreach (array_reverse($new) as $node) { // newest-first -> creation (input) order
                 $created[] = $node;
             }
+            foreach ($result['userErrors'] ?? [] as $error) {
+                $userErrors[] = $error;
+            }
         }
-        $created    = array_reverse($created); // newest-first -> creation (input) order
-        $userErrors = $result['userErrors'] ?? [];
 
         return ['media' => $created, 'userErrors' => $userErrors, 'mediaUserErrors' => $userErrors];
     }
@@ -757,12 +795,21 @@ final class Products extends AbstractResource
      *
      * @param list<MediaEntry> $slots
      * @return array{media:list<array{key:string,id:string,action:string}>,created:list<string>,replaced:list<string>,pruned:list<string>,adopted:list<string>,orderedIds:list<string>,reorder:array<string,mixed>,keyStoreSaved:bool,userErrors:list<array<string,mixed>>}
-     * @throws MediaKeyStoreException when no key store can be read (nothing is changed)
+     * @throws MediaKeyStoreException    when no key store can be read (nothing is changed)
+     * @throws \InvalidArgumentException when two slots share a key (nothing is changed)
      */
     public function syncMedia(string $id, array $slots, bool $prune = false): array
     {
         $gid   = Gid::product($id);
         $files = $this->files;
+
+        // A key identifies one image: two slots with the same key would create
+        // two images and track only one of them.
+        $counts     = array_count_values(array_map(static fn (MediaEntry $slot): string => $slot->key(), $slots));
+        $duplicates = array_keys(array_filter($counts, static fn (int $count): bool => $count > 1));
+        if ($duplicates !== []) {
+            throw new \InvalidArgumentException('Each media slot needs its own key; used more than once: ' . implode(', ', $duplicates) . '.');
+        }
 
         // Read first: if the key stores are unreadable we stop before uploading.
         $state    = $this->resolveMediaKeys($gid);

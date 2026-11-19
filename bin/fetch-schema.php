@@ -14,7 +14,7 @@ use GraphQL\Type\Introspection;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
-$version = $argv[1] ?? '2026-10';
+$version = $argv[1] ?? \Baldie81\ShopifyGraphQL\Configuration::DEFAULT_API_VERSION;
 if (preg_match('/^(\d{4}-\d{2}|unstable)$/', $version) !== 1) {
     fwrite(STDERR, "Invalid API version: {$version}\n");
     exit(1);

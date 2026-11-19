@@ -213,4 +213,47 @@ final class TranslationsTest extends MockClientTestCase
         self::assertSame(['title', 'body_html'], $vars['keys']);
         self::assertSame(['fr'], $vars['locales']);
     }
+
+    public function testRegisterLeavesOutKeysThatAreNotTranslatableAndReportsThem(): void
+    {
+        $client = $this->mockClient([
+            new Response(200, [], self::content([['key' => 'title', 'digest' => 'D', 'locale' => 'en']])),
+            new Response(200, [], self::registered()),
+        ]);
+
+        $result = $client->translations()->register('gid://shopify/Product/55', [
+            Translation::make('fr', 'title', 'Chapeau'),
+            Translation::make('fr', 'meta_title', 'Chapeau | Boutique'), // SEO title not customised: no digest
+        ]);
+
+        self::assertSame(['meta_title'], $result['skipped']);
+        self::assertSame(['title'], array_column($this->body(1)['variables']['translations'], 'key'));
+    }
+
+    public function testRegisterWithNothingTranslatableMakesNoMutation(): void
+    {
+        $client = $this->mockClient([new Response(200, [], self::content([]))]);
+
+        $result = $client->translations()->register('gid://shopify/Product/55', [Translation::make('fr', 'title', 'Chapeau')]);
+
+        self::assertSame(['title'], $result['skipped']);
+        self::assertSame([], $result['translations']);
+        self::assertCount(1, $this->history); // the digest lookup only
+    }
+
+    public function testRegisterSendsAtMost100TranslationsPerCall(): void
+    {
+        $reply  = static fn (string $key): Response => new Response(200, [], (string) json_encode(['data' => ['translationsRegister' => ['translations' => [['key' => $key, 'locale' => 'fr']], 'userErrors' => []]]]));
+        $client = $this->mockClient([$reply('k1'), $reply('k101')]);
+
+        $inputs = array_map(static fn (int $i): Translation => Translation::make('fr', "k{$i}", 'v', "d{$i}"), range(1, 101));
+        $result = $client->translations()->register('gid://shopify/Product/55', $inputs);
+
+        self::assertCount(2, $this->history);
+        self::assertCount(100, $this->body(0)['variables']['translations']);
+        self::assertCount(1, $this->body(1)['variables']['translations']);
+        self::assertSame(['k1', 'k101'], array_column($result['translations'], 'key'));
+        self::assertSame('d101', $result['translations'][1]['translatableContentDigest']);
+        self::assertCount(101, $result['digests']);
+    }
 }

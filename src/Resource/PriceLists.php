@@ -116,6 +116,8 @@ final class PriceLists extends AbstractResource
 
     /**
      * Add/update and delete fixed prices in one call (`priceListFixedPricesUpdate`).
+     * More than 250 prices or ids are sent in several calls (250 of each per
+     * call) and the results merged; `priceList` is the last one returned.
      *
      * @param list<array<string,mixed>> $pricesToAdd
      * @param list<string>              $variantIdsToDelete
@@ -127,15 +129,33 @@ final class PriceLists extends AbstractResource
             . ' priceListFixedPricesUpdate(priceListId: $priceListId, pricesToAdd: $pricesToAdd, variantIdsToDelete: $variantIdsToDelete) {'
             . ' priceList { id } pricesAdded { variant { id } price { amount currencyCode } } deletedFixedPriceVariantIds userErrors { field code message } } }';
 
-        return $this->gql->execute($mutation, [
-            'priceListId'        => Gid::priceList($id),
-            'pricesToAdd'        => array_map([self::class, 'coercePrice'], array_values($pricesToAdd)),
-            'variantIdsToDelete' => array_values(array_map(static fn (int|string $v): string => Gid::variant($v), $variantIdsToDelete)),
-        ])['priceListFixedPricesUpdate'] ?? ['priceList' => null, 'pricesAdded' => [], 'deletedFixedPriceVariantIds' => [], 'userErrors' => []];
+        $adds    = array_chunk(array_map([self::class, 'coercePrice'], array_values($pricesToAdd)), self::MAX_PRICES);
+        $deletes = array_chunk(array_values(array_map(static fn (int|string $v): string => Gid::variant($v), $variantIdsToDelete)), self::MAX_PRICES);
+
+        $merged = ['priceList' => null, 'pricesAdded' => [], 'deletedFixedPriceVariantIds' => [], 'userErrors' => []];
+        for ($i = 0, $calls = max(count($adds), count($deletes), 1); $i < $calls; $i++) {
+            $result = $this->gql->execute($mutation, [
+                'priceListId'        => Gid::priceList($id),
+                'pricesToAdd'        => $adds[$i] ?? [],
+                'variantIdsToDelete' => $deletes[$i] ?? [],
+            ])['priceListFixedPricesUpdate'] ?? [];
+
+            if (isset($result['priceList'])) {
+                $merged['priceList'] = $result['priceList'];
+            }
+            foreach (['pricesAdded', 'deletedFixedPriceVariantIds', 'userErrors'] as $list) {
+                foreach ($result[$list] ?? [] as $entry) {
+                    $merged[$list][] = $entry;
+                }
+            }
+        }
+
+        return $merged;
     }
 
     /**
-     * Remove fixed prices for the given variants (`priceListFixedPricesDelete`).
+     * Remove fixed prices for the given variants (`priceListFixedPricesDelete`,
+     * chunked at 250).
      *
      * @param list<string> $variantIds
      * @return array{deletedFixedPriceVariantIds:list<string>,userErrors:list<array<string,mixed>>}
@@ -146,10 +166,19 @@ final class PriceLists extends AbstractResource
             . ' priceListFixedPricesDelete(priceListId: $priceListId, variantIds: $variantIds) {'
             . ' deletedFixedPriceVariantIds userErrors { field code message } } }';
 
-        return $this->gql->execute($mutation, [
-            'priceListId' => Gid::priceList($id),
-            'variantIds'  => array_values(array_map(static fn (int|string $v): string => Gid::variant($v), $variantIds)),
-        ])['priceListFixedPricesDelete'] ?? ['deletedFixedPriceVariantIds' => [], 'userErrors' => []];
+        $gids = array_values(array_map(static fn (int|string $v): string => Gid::variant($v), $variantIds));
+
+        $merged = ['deletedFixedPriceVariantIds' => [], 'userErrors' => []];
+        foreach ($gids === [] ? [[]] : array_chunk($gids, self::MAX_PRICES) as $chunk) {
+            $result = $this->gql->execute($mutation, ['priceListId' => Gid::priceList($id), 'variantIds' => $chunk])['priceListFixedPricesDelete'] ?? [];
+            foreach (['deletedFixedPriceVariantIds', 'userErrors'] as $list) {
+                foreach ($result[$list] ?? [] as $entry) {
+                    $merged[$list][] = $entry;
+                }
+            }
+        }
+
+        return $merged;
     }
 
     /**

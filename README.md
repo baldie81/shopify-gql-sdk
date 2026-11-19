@@ -671,8 +671,8 @@ Notes:
   **data, not thrown**, so you inspect `$result['userErrors']`.
 - **Throttling & retries.** The client detects `extensions.code = THROTTLED` and
   HTTP 429, backs off (from `extensions.cost` / `Retry-After`) and retries —
-  `Configuration::maxRetries`, default 2. A transient 502/503/504 is retried for
-  **queries only**: a mutation may already have been applied, so it is never
+  `Configuration::maxRetries`, default 2. A transient 502/503/504, or a
+  connection failure/timeout, is retried for **queries only**: a mutation may already have been applied, so it is never
   blindly re-sent. With `graphql()->execute()`, a document counts as a query when
   its first token (after any comments) is `query` or `{`.
 - **GIDs.** Everything is identified by `gid://shopify/<Type>/<id>`; helpers coerce

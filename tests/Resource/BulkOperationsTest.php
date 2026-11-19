@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Baldie81\ShopifyGraphQL\Tests\Resource;
 
+use Baldie81\ShopifyGraphQL\Exception\TransportException;
+use GuzzleHttp\Psr7\Utils;
+use GuzzleHttp\Psr7\FnStream;
 use GuzzleHttp\Client as GuzzleClient;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
@@ -218,5 +221,54 @@ final class BulkOperationsTest extends TestCase
         $result = $bulk->cancel('gid://shopify/BulkOperation/1');
 
         self::assertSame('CANCELING', $result['bulkOperation']['status']);
+    }
+
+    private function downloading(Response $response): BulkOperations
+    {
+        $gql = new Client(new GuzzleClient([
+            'handler'  => HandlerStack::create(new MockHandler([])),
+            'base_uri' => 'https://t.myshopify.com/admin/api/2026-10/',
+        ]));
+        $downloader = new GuzzleClient(['handler' => HandlerStack::create(new MockHandler([$response])), 'http_errors' => false]);
+
+        return new BulkOperations($gql, static fn (int $us) => null, null, $downloader);
+    }
+
+    public function testResultsThrowsWhenTheDownloadIsRefusedWithoutAnException(): void
+    {
+        // An injected downloader with http_errors off doesn't throw on a 403 —
+        // and its XML error body must not be parsed as rows.
+        $bulk = $this->downloading(new Response(403, [], '<Error>expired</Error>'));
+
+        $this->expectException(TransportException::class);
+        $this->expectExceptionMessage('HTTP 403');
+        iterator_to_array($bulk->results(['url' => 'https://gcs.example/result.jsonl']));
+    }
+
+    public function testResultsWrapsADownloadThatBreaksPartWay(): void
+    {
+        $reads  = 0;
+        $stream = FnStream::decorate(Utils::streamFor(''), [
+            'eof'  => static fn (): bool => false,
+            'read' => static function () use (&$reads): string {
+                if ($reads++ === 0) {
+                    return '{"id":1}' . "\n" . '{"id":';
+                }
+
+                throw new \RuntimeException('connection reset');
+            },
+        ]);
+        $bulk = $this->downloading(new Response(200, [], $stream));
+
+        $rows = [];
+        try {
+            foreach ($bulk->results(['url' => 'https://gcs.example/result.jsonl']) as $row) {
+                $rows[] = $row;
+            }
+            self::fail('expected TransportException');
+        } catch (TransportException $e) {
+            self::assertSame([['id' => 1]], $rows); // the complete row was delivered before the break
+            self::assertStringContainsString('connection reset', $e->getMessage());
+        }
     }
 }

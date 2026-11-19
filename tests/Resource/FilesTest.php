@@ -178,4 +178,29 @@ final class FilesTest extends TestCase
         self::assertSame('BULK_MUTATION_VARIABLES', $this->gqlBody()['variables']['input'][0]['resource']);
         self::assertCount(1, $this->uploadHistory);
     }
+
+    public function testUploadThrowsWhenTheStorageHostRejectsTheBytesWithoutAnException(): void
+    {
+        // An injected uploader with http_errors off doesn't throw on a 403.
+        $gql = new Client(new GuzzleClient([
+            'handler'  => HandlerStack::create(new MockHandler([new Response(200, [], (string) json_encode(['data' => ['stagedUploadsCreate' => [
+                'stagedTargets' => [['url' => 'https://gcs.example/upload', 'resourceUrl' => 'https://gcs.example/resource/abc', 'parameters' => []]],
+                'userErrors'    => [],
+            ]]]))])),
+            'base_uri' => 'https://t.myshopify.com/admin/api/2026-10/',
+        ]));
+        $uploader = new GuzzleClient(['handler' => HandlerStack::create(new MockHandler([new Response(403, [], 'expired')])), 'http_errors' => false]);
+
+        $path = tempnam(sys_get_temp_dir(), 'sdk');
+        file_put_contents($path, 'x');
+
+        try {
+            (new Files($gql, $uploader))->upload($path, 'a.png');
+            self::fail('expected UploadException');
+        } catch (UploadException $e) {
+            self::assertStringContainsString('HTTP 403', $e->getMessage());
+        } finally {
+            @unlink($path);
+        }
+    }
 }

@@ -24,6 +24,9 @@ final class FulfillmentOrders extends AbstractResource
     private const FIELDS = 'id status requestStatus';
 
     /**
+     * A fulfillment order with its location, holds and first 50 line items.
+     * `lineItems.pageInfo.hasNextPage` is true when it has more than that.
+     *
      * @return array<string,mixed>|null
      */
     public function get(string $id): ?array
@@ -31,7 +34,7 @@ final class FulfillmentOrders extends AbstractResource
         $query = 'query ($id: ID!) { fulfillmentOrder(id: $id) { ' . self::FIELDS
             . ' assignedLocation { location { id name } }'
             . ' fulfillmentHolds { id reason reasonNotes }'
-            . ' lineItems(first: 50) { nodes { id remainingQuantity totalQuantity lineItem { id title sku } } } } }';
+            . ' lineItems(first: 50) { nodes { id remainingQuantity totalQuantity lineItem { id title sku } } pageInfo { hasNextPage } } } }';
 
         return $this->gql->execute($query, ['id' => Gid::fulfillmentOrder($id)])['fulfillmentOrder'] ?? null;
     }
