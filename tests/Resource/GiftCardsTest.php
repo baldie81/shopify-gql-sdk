@@ -87,4 +87,30 @@ final class GiftCardsTest extends MockClientTestCase
         self::assertStringContainsString('giftCardDeactivate(id: $id)', $this->body()['query']);
         self::assertSame('gid://shopify/GiftCard/1', $this->body()['variables']['id']);
     }
+
+    public function testCreateSendsInitialValueOnVersionsBefore2026_07(): void
+    {
+        // `initialAmount` doesn't exist there: Shopify rejects the whole input.
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['giftCardCreate' => ['giftCard' => ['id' => 'gid://shopify/GiftCard/1'], 'giftCardCode' => 'X', 'userErrors' => []]],
+        ]))], '2026-04');
+
+        $client->giftCards()->create(GiftCardInput::make('50', 'EUR')->note('Loyalty'));
+
+        $input = $this->body()['variables']['input'];
+        self::assertSame('50.00', $input['initialValue']);
+        self::assertArrayNotHasKey('initialAmount', $input);
+        self::assertSame('Loyalty', $input['note']);
+    }
+
+    public function testCreateLeavesARawInitialValueAloneOnOlderVersions(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['giftCardCreate' => ['giftCard' => null, 'giftCardCode' => null, 'userErrors' => []]],
+        ]))], '2026-01');
+
+        $client->giftCards()->create(['initialValue' => '25.00']);
+
+        self::assertSame(['initialValue' => '25.00'], $this->body()['variables']['input']);
+    }
 }

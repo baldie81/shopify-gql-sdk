@@ -6,6 +6,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`giftCards()->create()` works on API 2026-01 and 2026-04.** It always sent
+  `initialAmount`, which only exists from 2026-07, so Shopify rejected the
+  input on the two older versions. There it now sends `initialValue`; those
+  versions issue the card in the shop's currency, so the currency code you
+  pass is not sent.
+- **`inventory()->setQuantities()` no longer uses a deprecated field on API
+  2026-01.** It sends `changeFromQuantity: null` there, as on newer versions,
+  instead of `ignoreCompareQuantity`.
+
+### Added
+
+- `Configuration::SUPPORTED_API_VERSIONS` — the API versions a release is
+  validated against (currently `2026-01`, `2026-04`, `2026-07`, `2026-10`).
+
+### Internal
+
+- The schema-validation test runs once per supported API version instead of
+  only against the default, and `composer schema` downloads all of their
+  schemas (`php bin/fetch-schema.php <version>…` fetches specific ones).
+
 ## [1.6.0] - 2026-11-19
 
 ### Changed

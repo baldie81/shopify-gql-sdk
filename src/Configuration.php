@@ -18,6 +18,16 @@ final class Configuration
     /** The Admin API version used when none is given. */
     public const string DEFAULT_API_VERSION = '2026-10';
 
+    /**
+     * The API versions this release is validated against: every operation the
+     * SDK sends is checked against each one's schema. They are the versions
+     * Shopify serves at the time of release (a version lasts about a year).
+     * Other versions are accepted, but nothing checks them.
+     *
+     * @var list<string>
+     */
+    public const array SUPPORTED_API_VERSIONS = ['2026-01', '2026-04', '2026-07', self::DEFAULT_API_VERSION];
+
     private readonly string $host;
 
     /**

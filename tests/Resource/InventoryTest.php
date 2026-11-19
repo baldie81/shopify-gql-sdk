@@ -133,4 +133,24 @@ final class InventoryTest extends MockClientTestCase
         self::assertSame('gid://shopify/Location/1', $vars['locationId']);
         self::assertSame(50, $vars['available']);
     }
+
+    public function testSetQuantitiesOn2026_01SkipsCompareWithNullAndNoDirective(): void
+    {
+        // 2026-01 already has `changeFromQuantity` and deprecates `ignoreCompareQuantity`,
+        // but doesn't require the @idempotent directive yet.
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['inventorySetQuantities' => ['inventoryAdjustmentGroup' => ['reason' => 'correction'], 'userErrors' => []]],
+        ]))], '2026-01');
+
+        $client->inventory()->setQuantities([
+            ['inventoryItemId' => 'gid://shopify/InventoryItem/1', 'locationId' => 'gid://shopify/Location/1', 'quantity' => 100],
+        ]);
+
+        $body = $this->body();
+        self::assertArrayNotHasKey('ignoreCompareQuantity', $body['variables']['input']);
+        self::assertArrayHasKey('changeFromQuantity', $body['variables']['input']['quantities'][0]);
+        self::assertNull($body['variables']['input']['quantities'][0]['changeFromQuantity']);
+        self::assertStringNotContainsString('@idempotent', $body['query']);
+        self::assertArrayNotHasKey('idempotencyKey', $body['variables']);
+    }
 }

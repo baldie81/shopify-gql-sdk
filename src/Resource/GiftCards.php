@@ -60,6 +60,10 @@ final class GiftCards extends AbstractResource
      * Issue a gift card. The result includes `giftCardCode` — the **only** time
      * the plaintext code is returned, so capture it here if you need to deliver it.
      *
+     * `initialAmount` (amount + currency) exists from API 2026-07. On older
+     * versions it is sent as the bare `initialValue` those versions expect, and
+     * the card is issued in the shop's currency — the currency code is not sent.
+     *
      * @param GiftCardInput|array<string,mixed> $input
      * @return array{giftCard:?array<string,mixed>,giftCardCode:?string,userErrors:list<array<string,mixed>>}
      */
@@ -68,7 +72,13 @@ final class GiftCards extends AbstractResource
         $mutation = 'mutation ($input: GiftCardCreateInput!) {'
             . ' giftCardCreate(input: $input) { giftCard { ' . self::FIELDS . ' } giftCardCode userErrors { field message code } } }';
 
-        return $this->gql->execute($mutation, ['input' => $this->payload($input)])['giftCardCreate'] ?? ['giftCard' => null, 'giftCardCode' => null, 'userErrors' => []];
+        $payload = $this->payload($input);
+        if (isset($payload['initialAmount']) && !$this->gql->apiVersionAtLeast('2026-07')) {
+            $payload = ['initialValue' => (string) ($payload['initialAmount']['amount'] ?? '')] + $payload;
+            unset($payload['initialAmount']);
+        }
+
+        return $this->gql->execute($mutation, ['input' => $payload])['giftCardCreate'] ?? ['giftCard' => null, 'giftCardCode' => null, 'userErrors' => []];
     }
 
     /**

@@ -4,6 +4,10 @@
          bootstrap="vendor/autoload.php"
          colors="true"
          cacheDirectory=".phpunit.cache">
+    <php>
+        <!-- The schema-validation test loads a multi-MB schema per supported API version. -->
+        <ini name="memory_limit" value="1G"/>
+    </php>
     <testsuites>
         <testsuite name="shopify-gql-sdk">
             <directory>tests</directory>

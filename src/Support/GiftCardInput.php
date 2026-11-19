@@ -11,7 +11,10 @@ namespace Baldie81\ShopifyGraphQL\Support;
  *   GiftCardInput::make('50.00', 'USD')->recipient($friendId, message: 'Happy birthday!');
  *
  * The amount is sent as `initialAmount` (a `MoneyInput`), which replaces the
- * deprecated `initialValue`. Always pass the currency explicitly: the
+ * deprecated `initialValue`. (API versions before 2026-07 only know
+ * `initialValue`: {@see \Baldie81\ShopifyGraphQL\Resource\GiftCards::create()}
+ * sends that instead, and the card is issued in the shop's currency.) Always
+ * pass the currency explicitly: the
  * {@see DEFAULT_CURRENCY} fallback is deprecated and the argument becomes
  * required in 2.0. Pass the amount as a string to keep it exact (see {@see Money}).
  * Omit `code()` to let Shopify generate one — and remember the plaintext code is

@@ -53,7 +53,7 @@
   "minimum-stability": "stable",
   "prefer-stable": true,
   "scripts-descriptions": {
-    "schema": "Download Shopify's Admin GraphQL schema so the schema-validation test can run.",
+    "schema": "Download Shopify's Admin GraphQL schema for each supported API version, so the schema-validation test can run.",
     "check": "Static analysis + tests."
   }
 }

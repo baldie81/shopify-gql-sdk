@@ -54,16 +54,17 @@ final class Inventory extends AbstractResource
 
         $base       = ['name' => $name, 'reason' => $reason];
         $quantities = array_values($quantities);
-        if ($idem) {
-            // 2026-04+: every entry must carry `changeFromQuantity`. An explicit
-            // null skips the compare-and-swap check ("set to N, whatever it was");
-            // a caller-supplied value is kept as a deliberate guard.
+        if ($this->gql->apiVersionAtLeast('2026-01')) {
+            // `changeFromQuantity` arrived in 2026-01 and is mandatory from
+            // 2026-04. An explicit null skips the compare-and-swap check ("set to
+            // N, whatever it was"); a caller-supplied value is kept as a guard.
             $quantities = array_map(
                 static fn (array $q): array => array_key_exists('changeFromQuantity', $q) ? $q : $q + ['changeFromQuantity' => null],
                 $quantities,
             );
         } else {
-            // Pre-2026-04: bypass the compare check.
+            // Before 2026-01: bypass the compare check the old way (the flag is
+            // deprecated in 2026-01 and gone in 2026-04).
             $base['ignoreCompareQuantity'] = true;
         }
 

@@ -365,7 +365,8 @@ mutations attach the now-mandatory `@idempotent` directive (a UUID is generated 
 call/chunk; pass `idempotencyKey:` for your own retry-safe key), and `setQuantities`
 sends the now-required `changeFromQuantity` as `null` — an unconditional set, with
 no extra read. Supply `'changeFromQuantity' => N` in an entry to opt into a guarded
-(compare-and-swap) set. On ≤2026-01 the behaviour is unchanged.
+(compare-and-swap) set. On 2026-01 the directive isn't required and isn't sent;
+`changeFromQuantity` works the same way there.
 
 **Amounts.** Pass money as **strings** (`'17.50'`): they're sent digit-for-digit,
 so three-decimal currencies survive. Floats are accepted as a convenience. Anything
@@ -678,9 +679,13 @@ Notes:
 - **GIDs.** Everything is identified by `gid://shopify/<Type>/<id>`; helpers coerce
   numeric ids and extract them back.
 - **Versioning.** The dated `apiVersion` is part of the endpoint and defaults to
-  `2026-10`. Pin it explicitly in production; older versions still work — the
-  SDK adapts version-specific inputs (webhook `uri`/`callbackUrl`, 2026-04
-  idempotency and `changeFromQuantity`) to whatever you configure.
+  `2026-10`. Pin it explicitly in production. The versions Shopify currently
+  serves — `2026-01`, `2026-04`, `2026-07` and `2026-10`
+  (`Configuration::SUPPORTED_API_VERSIONS`) — are all supported: the SDK adapts
+  version-specific inputs (2026-04 idempotency, `changeFromQuantity`, gift card
+  `initialAmount`/`initialValue`) to whatever you configure, and every operation
+  is validated against each version's schema. Older versions are accepted but
+  can't be checked, since Shopify no longer publishes their schemas.
 
 ## Examples
 
@@ -717,11 +722,11 @@ composer test
 Unit tests mock Guzzle (no network). Because mocked responses can't tell you that
 Shopify would reject a query, one test validates **every operation the SDK sends**
 — documents, builder-produced variables, and use of deprecated fields — against
-Shopify's real Admin schema. It needs the schema downloaded once (it's skipped
-otherwise):
+Shopify's real Admin schema, once per supported API version. It needs the schemas
+downloaded once (a version without one is skipped):
 
 ```bash
-composer schema    # fetch the public Admin GraphQL schema into tests/fixtures/schema/
+composer schema    # fetch the public Admin GraphQL schemas into tests/fixtures/schema/
 composer check     # PHPStan + the full test suite
 ```
 

@@ -38,12 +38,13 @@ use Baldie81\ShopifyGraphQL\Support\ProductField;
 use Baldie81\ShopifyGraphQL\Support\ProductInput;
 use Baldie81\ShopifyGraphQL\Support\Translation;
 use Baldie81\ShopifyGraphQL\Support\VariantInput;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\RequestInterface;
 
 /**
  * Validates every operation the SDK sends against Shopify's real Admin GraphQL
- * schema: the document itself (unknown fields/arguments, wrong types), the
+ * schema, for each supported API version: the document itself (unknown fields/arguments, wrong types), the
  * variables the builders produce (coerced against the declared input types),
  * and use of deprecated fields.
  *
@@ -51,13 +52,12 @@ use Psr\Http\Message\RequestInterface;
  * a query Shopify would reject. This test drives each public method against a
  * recording transport and checks what was sent.
  *
- * The schema isn't committed (it is several MB and Shopify's). Fetch it with
- * `composer schema`; without it the test is skipped (or fails, when the
+ * The schemas aren't committed (each is several MB and Shopify's). Fetch them with
+ * `composer schema`; a version whose schema is missing is skipped (or fails, when the
  * SHOPIFY_SCHEMA_REQUIRED environment variable is set, as it is in CI).
  */
 final class SchemaValidationTest extends TestCase
 {
-    private const string VERSION = Configuration::DEFAULT_API_VERSION;
 
     /**
      * Deprecated members the SDK still uses on purpose, as `Type.field`.
@@ -78,23 +78,35 @@ final class SchemaValidationTest extends TestCase
         'Mutation.collectionRemoveProducts',
     ];
 
-    private static ?Schema $schema = null;
 
     /** @var list<array{query:string,variables:array<string,mixed>}> */
     private array $sent = [];
 
-    public function testEveryOperationIsValidAgainstTheSchema(): void
+    /**
+     * @return iterable<string,array{string}>
+     */
+    public static function versions(): iterable
     {
-        $schema = self::schema();
+        // Each version is validated separately: the SDK sends different operations depending on it.
+        foreach (Configuration::SUPPORTED_API_VERSIONS as $version) {
+            yield $version => [$version];
+        }
+    }
+
+    #[DataProvider('versions')]
+    public function testEveryOperationIsValidAgainstTheSchema(string $version): void
+    {
+        $schema = self::schema($version);
         if ($schema === null) {
             // CI sets this so a missing schema can't pass as a green build.
             if (getenv('SHOPIFY_SCHEMA_REQUIRED')) {
-                self::fail('Schema not found, and SHOPIFY_SCHEMA_REQUIRED is set. Run `composer schema`.');
+                self::fail("The {$version} schema was not found, and SHOPIFY_SCHEMA_REQUIRED is set. Run `composer schema`.");
             }
-            self::markTestSkipped('Schema not found. Run `composer schema` to download it.');
+            self::markTestSkipped("The {$version} schema was not found. Run `composer schema` to download it.");
         }
 
-        $this->exerciseEveryMethod();
+        $this->sent = [];
+        $this->exerciseEveryMethod($version);
 
         $problems = [];
         foreach ($this->sent as $operation) {
@@ -104,17 +116,17 @@ final class SchemaValidationTest extends TestCase
         }
 
         self::assertGreaterThan(90, count($this->sent), 'Expected the whole public surface to be exercised.');
-        self::assertSame([], array_keys($problems), 'Operations rejected by the ' . self::VERSION . ' schema');
+        self::assertSame([], array_keys($problems), "Operations rejected by the {$version} schema");
     }
 
-    private static function schema(): ?Schema
+    private static function schema(string $version): ?Schema
     {
-        $file = dirname(__DIR__) . '/fixtures/schema/' . self::VERSION . '.json';
+        $file = dirname(__DIR__) . "/fixtures/schema/{$version}.json";
         if (!is_file($file)) {
             return null;
         }
 
-        return self::$schema ??= BuildClientSchema::build((array) json_decode((string) file_get_contents($file), true), ['assumeValid' => true]);
+        return BuildClientSchema::build((array) json_decode((string) file_get_contents($file), true), ['assumeValid' => true]);
     }
 
     /**
@@ -211,7 +223,7 @@ final class SchemaValidationTest extends TestCase
      * A client whose transport records each operation and answers with just
      * enough data for multi-step methods to reach their later calls.
      */
-    private function client(): ShopifyClient
+    private function client(string $version): ShopifyClient
     {
         $handler = function (RequestInterface $request): Response {
             $body         = json_decode((string) $request->getBody(), true);
@@ -225,7 +237,7 @@ final class SchemaValidationTest extends TestCase
         return ShopifyClient::fromGuzzle(
             new GuzzleClient([
                 'handler'  => HandlerStack::create(static fn (RequestInterface $r) => \GuzzleHttp\Promise\Create::promiseFor($handler($r))),
-                'base_uri' => 'https://test.myshopify.com/admin/api/' . self::VERSION . '/',
+                'base_uri' => "https://test.myshopify.com/admin/api/{$version}/",
             ]),
             uploader: $storage,
             downloader: $storage,
@@ -264,9 +276,9 @@ final class SchemaValidationTest extends TestCase
         };
     }
 
-    private function exerciseEveryMethod(): void
+    private function exerciseEveryMethod(string $version): void
     {
-        $c   = $this->client();
+        $c   = $this->client($version);
         $mf  = [Metafield::text('custom', 'erp_id', 'A1'), Metafield::json('custom', 'data', ['a' => 1])];
         $pid = '1';
         $vid = 'gid://shopify/ProductVariant/1';
