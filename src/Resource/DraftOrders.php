@@ -20,7 +20,7 @@ use Baldie81\ShopifyGraphQL\Support\Gid;
  */
 final class DraftOrders extends AbstractResource
 {
-    private const FIELDS = 'id name status invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } createdAt customer { id email }';
+    private const FIELDS = 'id name status invoiceUrl totalPriceSet { shopMoney { amount currencyCode } } createdAt customer { id }';
 
     /**
      * @return array<string,mixed>|null

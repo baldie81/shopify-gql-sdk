@@ -189,4 +189,21 @@ final class OrdersTest extends MockClientTestCase
         self::assertSame('synced', $sent[1]['key']);
         self::assertSame('true', $sent[1]['value']);
     }
+
+    public function testDefaultSelectionsLeaveOutProtectedCustomerFields(): void
+    {
+        // An app without approval for customer email would get an `errors`
+        // entry for it, turning every default read into an exception.
+        $empty  = static fn (string $root): Response => new Response(200, [], (string) json_encode(['data' => [$root => null]]));
+        $client = $this->mockClient([$empty('order'), $empty('draftOrder'), $empty('giftCard')]);
+
+        $client->orders()->get('1');
+        $client->draftOrders()->get('1');
+        $client->giftCards()->get('1');
+
+        foreach ([0, 1, 2] as $index) {
+            self::assertStringContainsString('customer { id }', $this->body($index)['query']);
+            self::assertStringNotContainsString('email', $this->body($index)['query']);
+        }
+    }
 }

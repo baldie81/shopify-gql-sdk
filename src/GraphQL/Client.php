@@ -43,6 +43,17 @@ final class Client
     }
 
     /**
+     * Keeps the HTTP client — whose default headers hold the access token — out
+     * of `var_dump()` / `print_r()` output.
+     *
+     * @return array<string,mixed>
+     */
+    public function __debugInfo(): array
+    {
+        return ['path' => $this->path, 'apiVersion' => $this->apiVersion, 'maxRetries' => $this->maxRetries];
+    }
+
+    /**
      * Whether the configured API version is at least `$version` (dated `YYYY-MM`).
      * `latest`/`unstable` count as newest. Used to gate version-specific behaviour.
      */
@@ -129,7 +140,7 @@ final class Client
                     throw ThrottledException::fromResponse($errors, (array) ($decoded['extensions'] ?? []));
                 }
 
-                throw GraphQLException::fromErrors($errors, $status);
+                throw GraphQLException::fromErrors($errors, $status, is_array($decoded['data'] ?? null) ? $decoded['data'] : null);
             }
 
             return (array) ($decoded['data'] ?? []);

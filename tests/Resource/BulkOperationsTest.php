@@ -245,6 +245,25 @@ final class BulkOperationsTest extends TestCase
         iterator_to_array($bulk->results(['url' => 'https://gcs.example/result.jsonl']));
     }
 
+    public function testAFailedDownloadDoesNotPutTheSignedUrlInTheMessage(): void
+    {
+        // http_errors on (Guzzle's default): its message quotes the full request URL.
+        $gql = new Client(new GuzzleClient([
+            'handler'  => HandlerStack::create(new MockHandler([])),
+            'base_uri' => 'https://t.myshopify.com/admin/api/2026-10/',
+        ]));
+        $downloader = new GuzzleClient(['handler' => HandlerStack::create(new MockHandler([new Response(403, [], 'denied')]))]);
+        $bulk       = new BulkOperations($gql, static fn (int $us) => null, null, $downloader);
+
+        try {
+            iterator_to_array($bulk->results(['url' => 'https://storage.example/result.jsonl?X-Goog-Signature=SECRETSIG&Expires=1']));
+            self::fail('The 403 should have been reported.');
+        } catch (TransportException $e) {
+            self::assertStringContainsString('storage.example/result.jsonl', $e->getMessage());
+            self::assertStringNotContainsString('SECRETSIG', $e->getMessage());
+        }
+    }
+
     public function testResultsWrapsADownloadThatBreaksPartWay(): void
     {
         $reads  = 0;

@@ -72,11 +72,20 @@ final class Media implements Arrayable
         ];
     }
 
+    /**
+     * The source's filename. A URL whose last path segment isn't a filename
+     * (no extension) is told apart by its query string, so
+     * `…/watch?v=AAA` and `…/watch?v=BBB` don't share the key `watch`.
+     */
     private static function deriveKey(string $source): string
     {
-        $path = (string) (parse_url($source, PHP_URL_PATH) ?? $source);
-        $base = basename($path);
+        $base = basename((string) (parse_url($source, PHP_URL_PATH) ?? $source));
+        if ($base === '') {
+            return $source;
+        }
 
-        return $base !== '' ? $base : $source;
+        $query = (string) (parse_url($source, PHP_URL_QUERY) ?? '');
+
+        return $query !== '' && !str_contains($base, '.') ? "{$base}?{$query}" : $base;
     }
 }

@@ -65,12 +65,6 @@ final class SchemaValidationTest extends TestCase
     private const array ALLOWED_DEPRECATIONS = [
         // The replacement (`barcodes`) is not available on every API version the SDK supports.
         'ProductVariantsBulkInput.barcode',
-        // Kept in default selections so the response shape doesn't change under
-        // callers in a minor release; the replacements are selected alongside.
-        'Customer.email',
-        'Customer.phone',
-        'Customer.addresses',            // only the embedded `withAddresses` list; addresses() uses addressesV2
-        'WebhookSubscription.endpoint',  // `uri` is selected alongside
         // Used when customLineItem() is called without a currency.
         'DraftOrderLineItemInput.originalUnitPrice',
         // Replaced by collectionUpdate inclusions, which older supported API versions lack.

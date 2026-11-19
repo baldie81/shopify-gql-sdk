@@ -50,6 +50,39 @@ final class InventoryTest extends MockClientTestCase
         self::assertSame(-5, $body['variables']['input']['changes'][0]['delta']);
     }
 
+    public function testAdjustQuantitiesSendsTheMandatoryChangeFromQuantity(): void
+    {
+        $response = static fn (): Response => new Response(200, [], (string) json_encode([
+            'data' => ['inventoryAdjustQuantities' => ['inventoryAdjustmentGroup' => null, 'userErrors' => []]],
+        ]));
+        $item = ['inventoryItemId' => 'gid://shopify/InventoryItem/1', 'locationId' => 'gid://shopify/Location/1'];
+
+        // From 2026-04 Shopify rejects a change without the field, null included.
+        foreach (['2026-01', '2026-04', '2026-10'] as $version) {
+            $client = $this->mockClient([$response()], $version);
+            $client->inventory()->adjustQuantities([$item + ['delta' => -5], $item + ['delta' => 2, 'changeFromQuantity' => 7]]);
+
+            $changes = $this->body()['variables']['input']['changes'];
+            self::assertArrayHasKey('changeFromQuantity', $changes[0], $version);
+            self::assertNull($changes[0]['changeFromQuantity'], $version);
+            self::assertSame(7, $changes[1]['changeFromQuantity'], $version); // a caller's guard is kept
+        }
+    }
+
+    public function testACallersIdempotencyKeyIsSentAsGivenWhenOneCallIsEnough(): void
+    {
+        $client = $this->mockClient([new Response(200, [], (string) json_encode([
+            'data' => ['inventoryAdjustQuantities' => ['inventoryAdjustmentGroup' => null, 'userErrors' => []]],
+        ]))]);
+
+        $client->inventory()->adjustQuantities(
+            [['inventoryItemId' => 'gid://shopify/InventoryItem/1', 'locationId' => 'gid://shopify/Location/1', 'delta' => 1]],
+            idempotencyKey: 'my-key',
+        );
+
+        self::assertSame('my-key', $this->body()['variables']['idempotencyKey']);
+    }
+
     public function testSetQuantitiesChunksAtTheLimit(): void
     {
         $ok = (string) json_encode(['data' => ['inventorySetQuantities' => ['inventoryAdjustmentGroup' => ['reason' => 'correction'], 'userErrors' => []]]]);

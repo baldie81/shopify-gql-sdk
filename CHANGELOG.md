@@ -6,6 +6,82 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **The access token is no longer sent along on redirects.** The API client
+  built by `ShopifyClient::create()` doesn't follow redirects any more; Guzzle
+  re-sends custom headers, `X-Shopify-Access-Token` included, when a redirect
+  leads to another host (even from https to http). A client passed to
+  `fromGuzzle()` should set `'allow_redirects' => false` itself.
+- **`Configuration` only accepts `*.myshopify.com` hosts by default.** Any
+  hostname or IP address used to be accepted, so a `shop` value taken from
+  user input could direct the token to another host. **If you connect through
+  a custom host, pass `allowCustomHost: true`** — without it the constructor
+  now throws `InvalidArgumentException`.
+- The token no longer shows in `print_r()` / `var_dump()` / `json_encode()` of
+  the `Configuration` or the clients, and a `Configuration` can't be serialized.
+- Signed staged-upload and bulk-result URLs are stripped of their query string
+  in exception messages.
+- `MediaFolder::scan()` skips symbolic links.
+- Pagination stops when a cursor doesn't advance, and `bulkOperations()->results()`
+  refuses a "line" longer than 64 MB, so a misbehaving server can't make either
+  run without end.
+
+### Fixed
+
+- **`inventory()->adjustQuantities()` works on API 2026-04 and later** (the
+  default included). Shopify requires `changeFromQuantity` on every change
+  there, even as `null`; it is now sent, as `setQuantities()` already did. A
+  value you pass yourself is kept as a compare-and-swap guard.
+- **`syncMedia()` puts each image at its slot position.** Slots used to be
+  ordered among themselves only: syncing just `_2` and `_3` moved them to first
+  and second place, displacing the main image, and a single slot was never
+  moved at all, so a new `_1` stayed last. Positions are now absolute on the
+  product, images the sync doesn't name keep their order, and no reorder is
+  sent when everything is already in place.
+- **Images adopted by alt text are no longer pruned by a later
+  `prune: true`** unless a sync has named their key in the meantime. Adoption
+  takes every image with alt text, a merchant's own included; such keys are
+  now kept as unconfirmed (a reserved `@adopted` entry in the key map). A
+  first sync that itself prunes behaves as before.
+- **`products()->create()` / `update()` return the saved product when the
+  attached translations fail**, with a `TRANSLATIONS_FAILED` entry in
+  `userErrors`, instead of throwing — the product id used to be lost, and
+  retrying the create made a duplicate.
+- **Default media keys no longer collide for URLs without a filename.**
+  `…/watch?v=AAA` and `…/watch?v=BBB` both got the key `watch`, so
+  `ensureMedia()` skipped the second. When the last path segment has no
+  extension, the query string is now part of the key. Keys of ordinary file
+  URLs (`…/front.jpg?v=2`) are unchanged.
+- A caller's inventory idempotency key is sent as given when one call is
+  enough; the `-0`, `-1`, … suffix is only added when the input is chunked.
+- `Metafield` writes very small or large floats in plain decimal notation
+  (`0.00001`, not `1.0E-5`, which Shopify rejects).
+
+### Changed
+
+- **Default selections no longer ask for protected customer fields they don't
+  need.** `orders()`, `draftOrders()` and `giftCards()` select `customer { id }`
+  instead of `customer { id email }`: for an app not approved to read customer
+  email, Shopify answers with an `errors` entry and every one of those reads
+  threw. Pass `fields:` to read more.
+- `customers()` no longer selects the deprecated `email` / `phone` fields; use
+  `defaultEmailAddress.emailAddress` and `defaultPhoneNumber.phoneNumber`,
+  which were already returned.
+- `customers()->get()` / `search()` with `withAddresses: true` read the
+  addresses through `addressesV2` (the plain `addresses` field is deprecated):
+  they come back as `addresses.nodes`, the first 50, with
+  `addresses.pageInfo.hasNextPage`.
+- `webhooks()` reads a subscription's destination as `uri` only; the deprecated
+  `endpoint` union is no longer selected on API 2025-10 and later.
+- `GraphQLException` has a `data` property holding whatever Shopify returned
+  alongside the errors.
+- `syncMedia()`'s `orderedIds` lists the slots' media ids in slot order; it is
+  no longer the list sent to the reorder call.
+- `collections()->reorderProducts()` documents Shopify's limit of 250 moves per
+  call (not split automatically: moves build on one another and each call runs
+  as its own asynchronous job).
+
 ## [1.6.2] - 2026-11-19
 
 ### Fixed

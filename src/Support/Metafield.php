@@ -79,12 +79,29 @@ final class Metafield implements Arrayable
         ];
     }
 
+    /**
+     * A float in plain decimal notation: PHP writes very small and very large
+     * floats as `1.0E-5`, which Shopify's number types reject.
+     */
+    private static function decimal(float $value): string
+    {
+        $plain = (string) $value;
+        if (!is_finite($value) || stripos($plain, 'e') === false) {
+            return $plain;
+        }
+
+        $fixed = sprintf('%.15F', $value);
+
+        return str_contains($fixed, '.') ? rtrim(rtrim($fixed, '0'), '.') : $fixed;
+    }
+
     private static function stringify(mixed $value): string
     {
         return match (true) {
             is_string($value)            => $value,
             is_bool($value)              => $value ? 'true' : 'false',
-            is_int($value), is_float($value) => (string) $value,
+            is_int($value)               => (string) $value,
+            is_float($value)             => self::decimal($value),
             $value === null              => '',
             default                      => (string) json_encode($value),
         };

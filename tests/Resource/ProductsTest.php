@@ -169,4 +169,38 @@ final class ProductsTest extends MockClientTestCase
         self::assertArrayNotHasKey('translations', $result);
         self::assertCount(1, $this->history); // no digest lookup, no translationsRegister
     }
+
+
+    public function testCreateReturnsTheSavedProductWhenItsTranslationsFail(): void
+    {
+        $client = $this->mockClient([
+            new Response(200, [], (string) json_encode(['data' => ['productCreate' => [
+                'product' => ['id' => 'gid://shopify/Product/77', 'title' => 'Dress'], 'userErrors' => [],
+            ]]])),
+            new Response(400, [], '{"errors":"Bad Request"}'), // the digest lookup fails
+        ]);
+
+        $result = $client->products()->create(ProductInput::make()->field(
+            \Baldie81\ShopifyGraphQL\Support\ProductField::title('Dress')->withTranslation('fr', 'Robe'),
+        ));
+
+        // The id comes back, so the caller doesn't create the product a second time.
+        self::assertSame('gid://shopify/Product/77', $result['product']['id']);
+        self::assertSame('TRANSLATIONS_FAILED', $result['userErrors'][0]['code']);
+        self::assertSame([], $result['translations']['translations']);
+    }
+
+    public function testPaginationStopsWhenTheCursorDoesNotAdvance(): void
+    {
+        $page = static fn (): Response => new Response(200, [], (string) json_encode(['data' => ['products' => [
+            'nodes'    => [['id' => 'gid://shopify/Product/1']],
+            'pageInfo' => ['hasNextPage' => true, 'endCursor' => 'SAME'],
+        ]]]));
+        $client = $this->mockClient([$page(), $page(), $page()]);
+
+        $nodes = $client->products()->searchAll();
+
+        self::assertCount(2, $nodes);
+        self::assertCount(2, $this->history); // the second page repeated the cursor: stop
+    }
 }

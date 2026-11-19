@@ -96,19 +96,19 @@ final class ProductsSyncMediaTest extends MockClientTestCase
         ]);
 
         $result = $client->products()->syncMedia('55', [
-            MediaEntry::url(2, 'https://cdn.example.com/ACME_2.jpg'), // out of order on purpose
-            MediaEntry::url(1, 'https://cdn.example.com/ACME_1.jpg'),
+            MediaEntry::url(2, 'https://cdn.example.com/ACME_1.jpg'), // out of order on purpose
+            MediaEntry::url(1, 'https://cdn.example.com/ACME_2.jpg'), // the new image becomes the main one
         ]);
 
         self::assertSame(['ACME_1.jpg'], $result['replaced']);
         self::assertSame(['ACME_2.jpg'], $result['created']);
-        self::assertSame(['gid://shopify/MediaImage/1', 'gid://shopify/MediaImage/2'], $result['orderedIds']);
+        self::assertSame(['gid://shopify/MediaImage/2', 'gid://shopify/MediaImage/1'], $result['orderedIds']);
         self::assertSame([], $result['userErrors']);
 
         // the media gid + action is exposed per slot so it can be persisted
         self::assertSame([
-            ['key' => 'ACME_1.jpg', 'id' => 'gid://shopify/MediaImage/1', 'action' => 'replaced'],
             ['key' => 'ACME_2.jpg', 'id' => 'gid://shopify/MediaImage/2', 'action' => 'created'],
+            ['key' => 'ACME_1.jpg', 'id' => 'gid://shopify/MediaImage/1', 'action' => 'replaced'],
         ], $result['media']);
         self::assertCount(4, $this->history);
 
@@ -117,12 +117,10 @@ final class ProductsSyncMediaTest extends MockClientTestCase
         self::assertSame('gid://shopify/MediaImage/1', $replace['id']);
         self::assertSame('https://cdn.example.com/ACME_1.jpg', $replace['originalSource']);
 
-        // reorder puts slot 1 first (position "0"), slot 2 second
+        // the new image, appended last by Shopify, is moved to slot position 1;
+        // the other one then already sits second, so one move is enough
         self::assertSame(
-            [
-                ['id' => 'gid://shopify/MediaImage/1', 'newPosition' => '0'],
-                ['id' => 'gid://shopify/MediaImage/2', 'newPosition' => '1'],
-            ],
+            [['id' => 'gid://shopify/MediaImage/2', 'newPosition' => '0']],
             $this->body(3)['variables']['moves'],
         );
     }
@@ -139,9 +137,6 @@ final class ProductsSyncMediaTest extends MockClientTestCase
                 ]]],
                 'userErrors' => [],
             ]]])),
-            new Response(200, [], (string) json_encode(['data' => ['productReorderMedia' => [
-                'job' => ['id' => 'gid://shopify/Job/1', 'done' => false], 'mediaUserErrors' => [],
-            ]]])),
         ]);
 
         $result = $client->products()->syncMedia('55', [
@@ -151,7 +146,7 @@ final class ProductsSyncMediaTest extends MockClientTestCase
 
         self::assertSame(['A_1.jpg', 'A_2.jpg'], $result['created']);
         self::assertSame(['gid://shopify/MediaImage/1', 'gid://shopify/MediaImage/2'], $result['orderedIds']);
-        self::assertCount(3, $this->history); // media lookup + ONE createMedia + reorder
+        self::assertCount(2, $this->history); // media lookup + ONE createMedia; created in order, so no reorder
         self::assertCount(2, $this->body(1)['variables']['media']); // both creates in a single call
     }
 
@@ -231,8 +226,8 @@ final class ProductsSyncMediaTest extends MockClientTestCase
     {
         $client = $this->altOnlyClient([
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
-                ['id' => 'gid://shopify/MediaImage/OLD', 'alt' => 'image_1.jpg'],   // orphan (renamed away)
                 ['id' => 'gid://shopify/MediaImage/KEEP', 'alt' => 'SDK_1.jpg'],     // matches incoming
+                ['id' => 'gid://shopify/MediaImage/OLD', 'alt' => 'image_1.jpg'],   // orphan (renamed away)
             ]]]]])),
             new Response(200, [], (string) json_encode(['data' => ['fileUpdate' => [
                 'files' => [['id' => 'gid://shopify/MediaImage/KEEP', 'alt' => 'SDK_1.jpg']], 'userErrors' => [],
@@ -257,8 +252,8 @@ final class ProductsSyncMediaTest extends MockClientTestCase
     {
         $client = $this->altOnlyClient([
             new Response(200, [], (string) json_encode(['data' => ['product' => ['media' => ['nodes' => [
-                ['id' => 'gid://shopify/MediaImage/OLD', 'alt' => 'image_1.jpg'],
                 ['id' => 'gid://shopify/MediaImage/KEEP', 'alt' => 'SDK_1.jpg'],
+                ['id' => 'gid://shopify/MediaImage/OLD', 'alt' => 'image_1.jpg'],
             ]]]]])),
             new Response(200, [], (string) json_encode(['data' => ['fileUpdate' => [
                 'files' => [['id' => 'gid://shopify/MediaImage/KEEP']], 'userErrors' => [],

@@ -78,6 +78,10 @@ final class ShopifyClient
             'timeout'         => $config->timeout,
             'connect_timeout' => $config->connectTimeout,
             'verify'          => $config->verifySsl,
+            // The endpoint never redirects. Following one would re-send the
+            // access token to wherever it points (Guzzle only strips
+            // Authorization/Cookie when the host changes).
+            'allow_redirects' => false,
             'headers'         => [
                 'X-Shopify-Access-Token' => $config->accessToken,
                 'Content-Type'           => 'application/json',
@@ -98,6 +102,8 @@ final class ShopifyClient
      * Build a client around a pre-configured Guzzle client (custom
      * middleware/handlers). Its `base_uri` must point at the versioned Admin API
      * root (`.../admin/api/<version>/`) and carry the access-token header.
+     * Give it `'allow_redirects' => false`: Guzzle re-sends custom headers —
+     * the access token included — when a redirect leads to another host.
      *
      * The API version (which gates version-specific behaviour) is read from that
      * `base_uri`; pass `$apiVersion` only when it can't be — a value that
@@ -156,6 +162,17 @@ final class ShopifyClient
     public function graphql(): GraphQLClient
     {
         return $this->gql;
+    }
+
+    /**
+     * Keeps the HTTP clients — whose default headers hold the access token —
+     * out of `var_dump()` / `print_r()` output.
+     *
+     * @return array<string,mixed>
+     */
+    public function __debugInfo(): array
+    {
+        return ['apiVersion' => $this->gql->apiVersion()];
     }
 
     public function products(): Products

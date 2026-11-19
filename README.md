@@ -46,7 +46,7 @@ REST Admin API, so this is GraphQL-only from the start.
 - **`Support\CustomerInput`** / **`Support\Address`** — builders for customers and mailing addresses.
 - **`Support\CollectionInput`** / **`Support\PriceListInput`** / **`Support\DraftOrderInput`** / **`Support\GiftCardInput`** — builders for collections, price lists, draft orders and gift cards.
 - **`Support\Metafield`** — builder for metafields of any type (serialises the value).
-- **`Support\Media`** — `CreateMediaInput` builder whose `alt` is the idempotency key.
+- **`Support\Media`** — `CreateMediaInput` builder; its `key` (the filename by default) is what `ensureMedia()` dedupes on.
 - **`Support\MediaEntry` / `Support\MediaFolder`** — positioned media + parsing a
   folder of `SKU_1.jpg`, `SKU_2.jpg`, … drops.
 - **`Support\Translation`** — `TranslationInput` builder (digest optional).
@@ -74,13 +74,46 @@ $shopify = ShopifyClient::create(new Configuration(
 $product = $shopify->products()->get('123');   // numeric id or a GID
 ```
 
-`shop` accepts a handle, a hostname or a pasted URL; anything that isn't a
-hostname throws `InvalidArgumentException` up front. Optional settings: `timeout`,
+`shop` accepts a handle, a `*.myshopify.com` hostname or a pasted URL; anything
+else throws `InvalidArgumentException` up front. Optional settings: `timeout`,
 `connectTimeout`, `verifySsl` (these also apply to staged uploads and bulk-result
 downloads) and `maxRetries` (default 2).
 
 Already have a configured Guzzle client? `ShopifyClient::fromGuzzle($guzzle)` reads
 the API version from its `base_uri` (`…/admin/api/<version>/`).
+
+### Security notes
+
+- **The access token only goes to `*.myshopify.com`.** A host outside it (a
+  proxy, a mock server) needs `allowCustomHost: true` on the `Configuration`.
+  Leave it off whenever `shop` comes from user input — an OAuth parameter, a
+  form — or the token would be sent to whatever host was typed in.
+- **Redirects are not followed** on the API client. If you build your own with
+  `fromGuzzle()`, give it `'allow_redirects' => false` too: Guzzle re-sends
+  custom headers, the token among them, when a redirect leads to another host.
+- **Dumps.** `print_r()` / `var_dump()` / `json_encode()` of the `Configuration`
+  and the clients hide the token, and a `Configuration` refuses to be
+  serialized. Exception *messages* never contain it, but the previous
+  (Guzzle) exception attached to a `TransportException` holds the request,
+  headers included — don't dump exception objects wholesale into logs.
+- **`$fields` selections are spliced into the query as written.** Build them
+  in code; never from user input.
+
+### Protected customer data
+
+Shopify only returns customer names, emails, phone numbers and addresses to apps
+approved for those fields (custom apps have the access; public apps go through
+review). For a field the app may not read, Shopify sends `null` *and* an `errors`
+entry, which the SDK throws as a `GraphQLException` — the rest of the response is
+on the exception's `data`.
+
+So that a missing approval doesn't break unrelated reads, the default selections
+of `orders()`, `draftOrders()` and `giftCards()` only include `customer { id }`.
+Ask for more with `fields:` when your app has the access. `customers()` reads
+names, email, phone and the default address by default; pass a narrower
+`fields:` if your app isn't approved for them.
+- **Drop folders.** `MediaFolder::scan()` skips symbolic links, so a folder
+  others can write to can't point an upload at a file elsewhere on the machine.
 
 ## Products
 
@@ -272,7 +305,11 @@ For each slot `syncMedia()`:
 2. if the slot's key (the filename by default) is already on the product,
    **replaces its bytes in place via `fileUpdate`** (no duplicate file) — otherwise
    creates it;
-3. **reorders** all touched media so positions match (`_1` → first, `_2` → second…).
+3. **moves** each slot's image to its position on the product (`_1` → first,
+   `_2` → second…). Positions are absolute: dropping only `_2` and `_3` leaves the
+   first image where it is, and a single new `_1` becomes the main image. Images
+   the sync doesn't name keep their order and fill the remaining places. Nothing
+   is sent when everything is already in place.
 
 So re-dropping `ACME-1_1.jpg` with new content swaps that one image and keeps the
 order, instead of piling up duplicates.
@@ -283,7 +320,9 @@ set is removed, so the product ends up with exactly the supplied images (handy
 after renames). Images the SDK doesn't track, such as a merchant's own uploads, are
 left alone. The one exception is a product's first sync (rule 3 above): images
 adopted by their alt text count as tracked, so with `prune: true` any of them not
-in the new set is removed:
+in the new set is removed. If that first sync did *not* prune, an adopted image
+is only pruned later once some sync has named its key — until then it could just
+as well be a merchant upload that happened to have alt text:
 
 ```php
 $shopify->products()->syncMedia($productId, $slots, prune: true);
@@ -346,6 +385,7 @@ $shopify->inventory()->setQuantities([
     ['inventoryItemId' => $variants[0]['inventoryItem']['id'], 'locationId' => $location, 'quantity' => 100],
 ]);
 // also: adjustQuantities([... 'delta' => -5 ...]) and activate($inventoryItemId, $location, 100)
+// add 'changeFromQuantity' => N to an entry of either to apply it only if the current quantity is N
 ```
 
 An inventory item must be **tracked** (`VariantInput::tracked()`) and stocked at the
@@ -399,7 +439,7 @@ if (($final['status'] ?? null) === 'COMPLETED') {
 }
 // on failure: $final['status'] === 'FAILED' with $final['errorCode']; results($final, partial: true) reads partialDataUrl
 
-$bulk->current(BulkOperationType::Query); // most recent op of a type (or 'QUERY')
+$bulk->current(\Baldie81\ShopifyGraphQL\Enum\BulkOperationType::Query); // most recent op of a type (or 'QUERY')
 $bulk->list('status:running');            // recent operations, newest first (2026-01+)
 $bulk->cancel($op['id']);
 ```
@@ -523,7 +563,7 @@ $shopify->customers()->updateAddress($customerId, $addressId, Address::make()->c
 $shopify->customers()->deleteAddress($customerId, $addressId);
 
 // Reads include `defaultAddress` cheaply; pass withAddresses for the full list:
-$shopify->customers()->get($customerId, withAddresses: true);          // -> customer.addresses[]
+$shopify->customers()->get($customerId, withAddresses: true);          // -> customer.addresses.nodes[] (first 50)
 $shopify->customers()->searchAll('tag:vip', withAddresses: true);
 ```
 
@@ -661,8 +701,8 @@ Notes:
 ## GraphQL specifics (how this differs from a REST SDK)
 
 - **Selection sets.** Reads return a curated default field set (`Products::FIELDS`),
-  kept lean because Shopify bills by query cost. (Caller-supplied selections are a
-  planned extension.)
+  kept lean because Shopify bills by query cost. Pass your own with `fields:`
+  (see [Custom field selection](#custom-field-selection)).
 - **Cursor pagination.** No page numbers — connections expose `pageInfo
   { hasNextPage, endCursor }`; `searchAll()` walks `after` until exhausted (page
   size capped at Shopify's max of 250).

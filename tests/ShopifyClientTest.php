@@ -46,4 +46,23 @@ final class ShopifyClientTest extends TestCase
         self::assertSame('2026-04', $client->graphql()->apiVersion());
         self::assertSame($client->files(), $client->files());
     }
+
+
+    public function testCreateDoesNotFollowRedirects(): void
+    {
+        // A redirect to another host would carry the access-token header along.
+        $client = ShopifyClient::create(new Configuration('my-store', 'shpat_x'));
+        $guzzle = (new \ReflectionProperty($client->graphql(), 'client'))->getValue($client->graphql());
+
+        self::assertInstanceOf(Client::class, $guzzle);
+        self::assertFalse($guzzle->getConfig('allow_redirects'));
+    }
+
+    public function testDumpingTheClientDoesNotShowTheAccessToken(): void
+    {
+        $client = ShopifyClient::create(new Configuration('my-store', 'shpat_secret'));
+
+        self::assertStringNotContainsString('shpat_secret', print_r($client, true));
+        self::assertStringNotContainsString('shpat_secret', print_r($client->graphql(), true));
+    }
 }

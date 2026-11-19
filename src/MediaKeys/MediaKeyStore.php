@@ -29,6 +29,13 @@ interface MediaKeyStore
     public const string OWNER_KEY = '@product';
 
     /**
+     * Reserved entry listing (as a JSON array) the keys that were adopted by alt
+     * text and haven't been named by a sync since. Like {@see OWNER_KEY}, a store
+     * keeps and returns it as it would any other entry.
+     */
+    public const string ADOPTED_KEY = '@adopted';
+
+    /**
      * The stored map for a product; empty when nothing is stored.
      *
      * @return array<string,string> key => media GID (plus the {@see OWNER_KEY} entry, when stored)

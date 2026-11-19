@@ -25,7 +25,7 @@ use Baldie81\ShopifyGraphQL\Support\Money;
 final class GiftCards extends AbstractResource
 {
     private const string FIELDS = 'id balance { amount currencyCode } initialValue { amount currencyCode }'
-        . ' enabled expiresOn lastCharacters note createdAt customer { id email }';
+        . ' enabled expiresOn lastCharacters note createdAt customer { id }';
 
     /**
      * @return array<string,mixed>|null

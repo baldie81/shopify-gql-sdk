@@ -43,7 +43,9 @@ final class MediaFolder
 
         foreach (scandir($dir) ?: [] as $entry) {
             $path = $dir . DIRECTORY_SEPARATOR . $entry;
-            if (!is_file($path)) {
+            // Links are skipped: a drop folder others can write to must not be
+            // able to point the upload at a file elsewhere on the machine.
+            if (!is_file($path) || is_link($path)) {
                 continue;
             }
 

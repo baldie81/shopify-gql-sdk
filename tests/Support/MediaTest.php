@@ -37,4 +37,16 @@ final class MediaTest extends TestCase
         self::assertSame('EXTERNAL_VIDEO', $media->toArray()['mediaContentType']);
         self::assertSame('promo', $media->key());
     }
+
+
+    public function testUrlsWithoutAFilenameAreToldApartByTheirQuery(): void
+    {
+        $a = Media::make('https://www.youtube.com/watch?v=AAA', MediaContentType::ExternalVideo);
+        $b = Media::make('https://www.youtube.com/watch?v=BBB', MediaContentType::ExternalVideo);
+
+        self::assertSame('watch?v=AAA', $a->key());
+        self::assertNotSame($a->key(), $b->key());
+        // A real filename is the key whatever cache-busting query follows it.
+        self::assertSame('front.jpg', Media::image('https://cdn.example.com/front.jpg?v=12')->key());
+    }
 }

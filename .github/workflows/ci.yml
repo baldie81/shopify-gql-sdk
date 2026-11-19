@@ -33,11 +33,33 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           coverage: none
+        env:
+          # Authenticated package downloads: anonymous ones from GitHub get
+          # rate limited (HTTP 429) every so often and fail the build.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Validate composer.json
         run: composer validate --strict
 
-      - run: composer install --no-interaction --no-progress
+      - name: Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ matrix.php }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-${{ matrix.php }}-
+
+      - name: Install dependencies
+        # Retried: a download that fails on a busy mirror usually works a moment later.
+        run: |
+          for attempt in 1 2 3; do
+            composer install --no-interaction --no-progress && exit 0
+            echo "composer install failed (attempt $attempt); retrying in 20s"
+            sleep 20
+          done
+          exit 1
 
       - name: Security advisories
         run: composer audit --abandoned=report
@@ -63,8 +85,17 @@ jobs:
         with:
           php-version: '8.3'
           coverage: none
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - run: composer update --prefer-lowest --prefer-stable --no-interaction --no-progress
+      - name: Install the lowest allowed dependencies
+        run: |
+          for attempt in 1 2 3; do
+            composer update --prefer-lowest --prefer-stable --no-interaction --no-progress && exit 0
+            echo "composer update failed (attempt $attempt); retrying in 20s"
+            sleep 20
+          done
+          exit 1
 
       - name: Download Shopify schema
         run: composer schema

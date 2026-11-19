@@ -73,7 +73,9 @@ final class Inventory extends AbstractResource
 
     /**
      * Adjust quantities by deltas. Each entry is
-     * `['inventoryItemId' => …, 'locationId' => …, 'delta' => ±N]`.
+     * `['inventoryItemId' => …, 'locationId' => …, 'delta' => ±N]`. Add
+     * `'changeFromQuantity' => M` to an entry to apply it only if the current
+     * quantity is M; without it the delta is applied whatever the quantity is.
      *
      * @param list<array<string,mixed>> $changes
      * @return array{inventoryAdjustmentGroup:?array<string,mixed>,userErrors:list<array<string,mixed>>}
@@ -86,6 +88,16 @@ final class Inventory extends AbstractResource
             . ' inventoryAdjustQuantities(input: $input)' . $directive . ' {'
             . ' inventoryAdjustmentGroup { reason changes { name delta } } userErrors { field message code } } }';
 
+        $changes = array_values($changes);
+        if ($this->gql->apiVersionAtLeast('2026-01')) {
+            // As in setQuantities(): the field exists from 2026-01 and must be
+            // sent from 2026-04, an explicit null meaning "no compare check".
+            $changes = array_map(
+                static fn (array $c): array => array_key_exists('changeFromQuantity', $c) ? $c : $c + ['changeFromQuantity' => null],
+                $changes,
+            );
+        }
+
         return $this->bulk($mutation, 'inventoryAdjustQuantities', 'changes', $changes, ['name' => $name, 'reason' => $reason], $idem, $idempotencyKey);
     }
 
@@ -93,7 +105,9 @@ final class Inventory extends AbstractResource
      * Run a set/adjust mutation, chunking the entries at {@see MAX_QUANTITIES}.
      * userErrors are aggregated; `inventoryAdjustmentGroup` reflects the last chunk.
      * When idempotency is required (2026-04+), each chunk gets a distinct key — a
-     * shared key would make Shopify drop later chunks as duplicates.
+     * shared key would make Shopify drop later chunks as duplicates. A caller's
+     * key is sent as given when everything fits in one call, and with a
+     * `-0`, `-1`, … suffix per call otherwise.
      *
      * @param list<array<string,mixed>> $entries
      * @param array<string,mixed>       $baseInput
@@ -102,10 +116,15 @@ final class Inventory extends AbstractResource
     private function bulk(string $mutation, string $field, string $entriesKey, array $entries, array $baseInput, bool $idem, ?string $idempotencyKey): array
     {
         $merged = ['inventoryAdjustmentGroup' => null, 'userErrors' => []];
-        foreach (array_chunk(array_values($entries), self::MAX_QUANTITIES) as $i => $chunk) {
+        $chunks = array_chunk(array_values($entries), self::MAX_QUANTITIES);
+        foreach ($chunks as $i => $chunk) {
             $variables = ['input' => $baseInput + [$entriesKey => $chunk]];
             if ($idem) {
-                $variables['idempotencyKey'] = $idempotencyKey !== null ? "{$idempotencyKey}-{$i}" : $this->newIdempotencyKey();
+                $variables['idempotencyKey'] = match (true) {
+                    $idempotencyKey === null => $this->newIdempotencyKey(),
+                    count($chunks) === 1     => $idempotencyKey,
+                    default                  => "{$idempotencyKey}-{$i}",
+                };
             }
             $result = $this->gql->execute($mutation, $variables)[$field] ?? [];
             if (isset($result['inventoryAdjustmentGroup'])) {

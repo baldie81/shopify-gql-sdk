@@ -20,16 +20,22 @@ final class Customers extends AbstractResource
 {
     private const ADDRESS_BODY = 'id firstName lastName company address1 address2 city provinceCode countryCodeV2 zip phone';
 
-    // `email`/`phone` are deprecated by Shopify in favour of defaultEmailAddress /
-    // defaultPhoneNumber. Both are selected so existing callers keep working;
-    // the deprecated pair is dropped from the default selection in 2.0.
-    private const FIELDS = 'id legacyResourceId email firstName lastName phone numberOfOrders createdAt updatedAt'
+    // Email and phone are read through defaultEmailAddress / defaultPhoneNumber
+    // (the bare `email` / `phone` fields are deprecated by Shopify).
+    //
+    // Names, email, phone and addresses are protected customer data: an app that
+    // isn't approved for those fields gets an `errors` entry from Shopify, so
+    // these reads throw a GraphQLException (its `data` holds the rest). Pass a
+    // `fields:` selection limited to what the app may read in that case.
+    private const FIELDS = 'id legacyResourceId firstName lastName numberOfOrders createdAt updatedAt'
         . ' defaultEmailAddress { emailAddress } defaultPhoneNumber { phoneNumber }'
         . ' defaultAddress { ' . self::ADDRESS_BODY . ' }';
 
     /**
-     * Fetch a customer. Pass `$withAddresses` to include the full address list
-     * (otherwise just `defaultAddress` comes back).
+     * Fetch a customer. Pass `$withAddresses` to include its first 50 addresses
+     * as `addresses.nodes` (`addresses.pageInfo.hasNextPage` says whether there
+     * are more; {@see addresses()} reads them all). Otherwise just
+     * `defaultAddress` comes back.
      *
      * @return array<string,mixed>|null
      */
@@ -177,7 +183,9 @@ final class Customers extends AbstractResource
 
     private static function selection(bool $withAddresses): string
     {
-        return self::FIELDS . ($withAddresses ? ' addresses(first: 50) { ' . self::ADDRESS_BODY . ' }' : '');
+        return self::FIELDS . ($withAddresses
+            ? ' addresses: addressesV2(first: 50) { nodes { ' . self::ADDRESS_BODY . ' } pageInfo { hasNextPage } }'
+            : '');
     }
 
     private static function listQuery(bool $withAddresses, ?string $fields = null): string

@@ -18,8 +18,12 @@ use Baldie81\ShopifyGraphQL\Support\Gid;
  */
 final class Orders extends AbstractResource
 {
+    // The customer is selected by id only: its email, name, phone and address
+    // are protected customer data, which Shopify answers with an `errors` entry
+    // (so the read would throw) for an app not approved for those fields. Read
+    // them with `fields:` or through customers()->get().
     private const FIELDS = 'id legacyResourceId name createdAt processedAt displayFinancialStatus displayFulfillmentStatus'
-        . ' currentTotalPriceSet { shopMoney { amount currencyCode } } customer { id email }';
+        . ' currentTotalPriceSet { shopMoney { amount currencyCode } } customer { id }';
 
     /**
      * @return array<string,mixed>|null

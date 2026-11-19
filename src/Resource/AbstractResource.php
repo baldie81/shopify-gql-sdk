@@ -20,6 +20,15 @@ abstract class AbstractResource
     ) {}
 
     /**
+     * Drop the query string of any URL in an error message. Staged-upload and
+     * bulk-result URLs are signed: the signature must not travel into logs.
+     */
+    protected static function withoutUrlQueries(string $message): string
+    {
+        return (string) preg_replace('#(https?://[^\s?"\'`<>]+)\?[^\s"\'`<>]*#i', '$1?…', $message);
+    }
+
+    /**
      * Normalize an object-or-array argument to the variables' payload.
      *
      * @param Arrayable|array<string,mixed> $value
@@ -152,8 +161,10 @@ abstract class AbstractResource
 
             $pageInfo = $conn['pageInfo'] ?? [];
             $hasNext  = (bool) ($pageInfo['hasNextPage'] ?? false);
+            $previous = $after;
             $after    = $pageInfo['endCursor'] ?? null;
-        } while ($hasNext && $after !== null && ($limit === null || count($nodes) < $limit));
+            // A cursor that doesn't advance would otherwise loop for ever.
+        } while ($hasNext && $after !== null && $after !== $previous && ($limit === null || count($nodes) < $limit));
 
         return $nodes;
     }

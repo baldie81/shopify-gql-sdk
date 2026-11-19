@@ -52,4 +52,22 @@ final class MediaFolderTest extends TestCase
 
         self::assertSame(3, $scanned['WITH_UNDER_SCORE'][0]->position());
     }
+
+
+    public function testSymlinksAreNotFollowed(): void
+    {
+        $outside = tempnam(sys_get_temp_dir(), 'sdk-secret');
+        self::assertIsString($outside);
+        $this->touchFile('REAL_1.jpg');
+        if (!@symlink($outside, $this->dir . '/LINK_1.jpg')) {
+            unlink($outside);
+            self::markTestSkipped('Symlinks are not available here.');
+        }
+
+        try {
+            self::assertSame(['REAL'], array_keys(MediaFolder::scan($this->dir)));
+        } finally {
+            unlink($outside);
+        }
+    }
 }

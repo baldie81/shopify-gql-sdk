@@ -22,8 +22,10 @@ use Baldie81\ShopifyGraphQL\Support\Gid;
  */
 final class Webhooks extends AbstractResource
 {
-    private const FIELDS = 'id topic format includeFields filter createdAt updatedAt'
-        . ' endpoint { __typename ... on WebhookHttpEndpoint { callbackUrl } ... on WebhookEventBridgeEndpoint { arn } ... on WebhookPubSubEndpoint { pubSubProject pubSubTopic } }';
+    private const FIELDS = 'id topic format includeFields filter createdAt updatedAt';
+
+    /** How the destination is read before `uri` existed (API versions up to 2025-07). */
+    private const LEGACY_ENDPOINT = ' endpoint { __typename ... on WebhookHttpEndpoint { callbackUrl } ... on WebhookEventBridgeEndpoint { arn } ... on WebhookPubSubEndpoint { pubSubProject pubSubTopic } }';
 
     /**
      * @return array{nodes:list<array<string,mixed>>,pageInfo:array<string,mixed>}
@@ -117,13 +119,12 @@ final class Webhooks extends AbstractResource
     }
 
     /**
-     * The subscription selection. `uri` (2025-10+) is the current way to read
-     * the destination; the deprecated `endpoint` union is still selected so
-     * existing callers keep working until 2.0.
+     * The subscription selection: the destination is read as `uri` (2025-10+),
+     * or through the older `endpoint` union on versions that don't have it.
      */
     private function fields(): string
     {
-        return self::FIELDS . ($this->gql->apiVersionAtLeast('2025-10') ? ' uri' : '');
+        return self::FIELDS . ($this->gql->apiVersionAtLeast('2025-10') ? ' uri' : self::LEGACY_ENDPOINT);
     }
 
     private function listQuery(): string

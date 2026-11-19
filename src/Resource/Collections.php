@@ -166,6 +166,11 @@ final class Collections extends AbstractResource
      * Each move is `['id' => productGid, 'newPosition' => 0]` (zero-based).
      * `newPosition` is sent as a string, as its `UnsignedInt64` type requires.
      *
+     * Shopify accepts up to 250 moves per call and applies them in order. They
+     * are not split across calls here: each call starts its own asynchronous
+     * job, and moves that build on one another can't safely run as separate
+     * jobs. For more than 250, send a batch, wait for its job, then the next.
+     *
      * @param list<array<string,mixed>> $moves
      * @return array{job:?array<string,mixed>,userErrors:list<array<string,mixed>>}
      */

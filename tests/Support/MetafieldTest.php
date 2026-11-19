@@ -52,4 +52,15 @@ final class MetafieldTest extends TestCase
         self::assertSame('product_reference', $ref['type']);
         self::assertSame('gid://shopify/Product/9', $ref['value']);
     }
+
+
+    public function testFloatsAreNeverWrittenInExponentNotation(): void
+    {
+        $value = static fn (float $v): string => Metafield::make('n', 'k', 'number_decimal', $v)->toArray()['value'];
+
+        self::assertSame('0.00001', $value(0.00001)); // PHP's own cast gives "1.0E-5"
+        self::assertSame('1.5', $value(1.5));
+        self::assertSame('3', $value(3.0));
+        self::assertSame('-0.0000025', $value(-0.0000025));
+    }
 }

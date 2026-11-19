@@ -265,6 +265,7 @@ final class ProductsMediaKeysTest extends MockClientTestCase
                 ['OLD_1.jpg' => 'gid://shopify/MediaImage/GONE'],
             ),
             self::created([['id' => 'gid://shopify/MediaImage/6', 'alt' => 'NEW_1.jpg']]),
+            new Response(200, [], (string) json_encode(['data' => ['productReorderMedia' => ['job' => null, 'mediaUserErrors' => []]]])),
             self::saved(),
         ]);
 
@@ -272,8 +273,8 @@ final class ProductsMediaKeysTest extends MockClientTestCase
 
         self::assertSame([], $result['adopted']);
         self::assertSame([], $result['pruned']);
-        self::assertSame(['NEW_1.jpg' => 'gid://shopify/MediaImage/6'], $this->savedMap(2));
-        self::assertCount(3, $this->history); // read, create, save — no detach
+        self::assertSame(['NEW_1.jpg' => 'gid://shopify/MediaImage/6'], $this->savedMap(3));
+        self::assertCount(4, $this->history); // read, create, move to first place, save — no detach
     }
 
     public function testAnEmptyMapOfItsOwnAlsoStopsAdoption(): void
@@ -337,7 +338,6 @@ final class ProductsMediaKeysTest extends MockClientTestCase
             self::media([['id' => 'gid://shopify/MediaImage/1', 'alt' => 'old']], ['A_1.jpg' => 'gid://shopify/MediaImage/1']),
             self::replaced(),
             self::created([['id' => 'gid://shopify/MediaImage/2', 'alt' => 'Red tee, back']]),
-            new Response(200, [], (string) json_encode(['data' => ['productReorderMedia' => ['job' => null, 'mediaUserErrors' => []]]])),
             self::saved(),
         ]);
 
@@ -351,7 +351,7 @@ final class ProductsMediaKeysTest extends MockClientTestCase
         // The key, not the alt text, identifies the new media.
         self::assertSame(
             ['A_1.jpg' => 'gid://shopify/MediaImage/1', 'A_2.jpg' => 'gid://shopify/MediaImage/2'],
-            $this->savedMap(4),
+            $this->savedMap(3),
         );
         self::assertSame(['A_2.jpg'], $result['created']);
     }
@@ -364,7 +364,6 @@ final class ProductsMediaKeysTest extends MockClientTestCase
                 ['id' => 'gid://shopify/MediaImage/2', 'alt' => 'Red tee'],
                 ['id' => 'gid://shopify/MediaImage/1', 'alt' => 'Red tee'],
             ]),
-            new Response(200, [], (string) json_encode(['data' => ['productReorderMedia' => ['job' => null, 'mediaUserErrors' => []]]])),
             self::saved(),
         ]);
 
@@ -375,7 +374,7 @@ final class ProductsMediaKeysTest extends MockClientTestCase
 
         self::assertSame(
             ['A_1.jpg' => 'gid://shopify/MediaImage/1', 'A_2.jpg' => 'gid://shopify/MediaImage/2'],
-            $this->savedMap(3),
+            $this->savedMap(2),
         );
     }
 
@@ -441,8 +440,8 @@ final class ProductsMediaKeysTest extends MockClientTestCase
 
         try {
             $client->products()->syncMedia('55', [
-                MediaEntry::url(1, 'https://cdn.test/A_1.jpg'),
-                MediaEntry::url(2, 'https://cdn.test/A_2.jpg'),
+                MediaEntry::url(2, 'https://cdn.test/A_1.jpg'),
+                MediaEntry::url(1, 'https://cdn.test/A_2.jpg'), // new and first: needs a move
             ]);
             self::fail('The reorder failure should have been rethrown.');
         } catch (TransportException $e) {
@@ -471,8 +470,8 @@ final class ProductsMediaKeysTest extends MockClientTestCase
         $this->expectExceptionMessage('reorder timed out');
 
         $client->products()->syncMedia('55', [
-            MediaEntry::url(1, 'https://cdn.test/A_1.jpg'),
-            MediaEntry::url(2, 'https://cdn.test/A_2.jpg'),
+            MediaEntry::url(2, 'https://cdn.test/A_1.jpg'),
+            MediaEntry::url(1, 'https://cdn.test/A_2.jpg'),
         ]);
     }
 
@@ -528,6 +527,137 @@ final class ProductsMediaKeysTest extends MockClientTestCase
 
         self::assertTrue($result['keyStoreSaved']);
         self::assertCount(1, $this->history); // the read only: nothing to write
+    }
+
+    /**
+     * The moves sent by the reorder request at $index, as `id suffix => position`.
+     *
+     * @return array<string,string>
+     */
+    private function moves(int $index): array
+    {
+        $body = $this->body($index);
+        self::assertStringContainsString('productReorderMedia', $body['query']);
+
+        $moves = [];
+        foreach ($body['variables']['moves'] as $move) {
+            $moves[substr($move['id'], strlen('gid://shopify/MediaImage/'))] = $move['newPosition'];
+        }
+
+        return $moves;
+    }
+
+    private static function reordered(): Response
+    {
+        return new Response(200, [], (string) json_encode(['data' => ['productReorderMedia' => ['job' => null, 'mediaUserErrors' => []]]]));
+    }
+
+    public function testSyncingOnlyLaterSlotsLeavesTheMainImageInPlace(): void
+    {
+        $map = ['S_1.jpg' => 'gid://shopify/MediaImage/1', 'S_2.jpg' => 'gid://shopify/MediaImage/2', 'S_3.jpg' => 'gid://shopify/MediaImage/3'];
+        $client = $this->mockClient([
+            self::media([['id' => 'gid://shopify/MediaImage/1'], ['id' => 'gid://shopify/MediaImage/2'], ['id' => 'gid://shopify/MediaImage/3']], $map),
+            self::replaced(),
+        ]);
+
+        $client->products()->syncMedia('55', [
+            MediaEntry::url(2, 'https://cdn.test/S_2.jpg'),
+            MediaEntry::url(3, 'https://cdn.test/S_3.jpg'),
+        ]);
+
+        self::assertCount(2, $this->history); // read + replace: everything is where its slot says, nothing moves
+    }
+
+    public function testASingleNewSlotIsMovedToItsPosition(): void
+    {
+        $map = ['S_2.jpg' => 'gid://shopify/MediaImage/2', 'S_3.jpg' => 'gid://shopify/MediaImage/3'];
+        $client = $this->mockClient([
+            self::media([['id' => 'gid://shopify/MediaImage/2'], ['id' => 'gid://shopify/MediaImage/3']], $map),
+            self::created([['id' => 'gid://shopify/MediaImage/9', 'alt' => 'S_1.jpg']]),
+            self::reordered(),
+            self::saved(),
+        ]);
+
+        $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.test/S_1.jpg')]);
+
+        self::assertSame(['9' => '0'], $this->moves(2)); // appended last by Shopify, made the main image
+    }
+
+    public function testSlotsArePlacedAroundMediaTheSyncDoesNotTouch(): void
+    {
+        // On the product: merchant image M first, then ours in the wrong order.
+        $map = ['S_1.jpg' => 'gid://shopify/MediaImage/1', 'S_3.jpg' => 'gid://shopify/MediaImage/3'];
+        $client = $this->mockClient([
+            self::media([['id' => 'gid://shopify/MediaImage/M'], ['id' => 'gid://shopify/MediaImage/3'], ['id' => 'gid://shopify/MediaImage/1']], $map),
+            self::replaced(),
+            self::reordered(),
+        ]);
+
+        $client->products()->syncMedia('55', [
+            MediaEntry::url(1, 'https://cdn.test/S_1.jpg'),
+            MediaEntry::url(3, 'https://cdn.test/S_3.jpg'),
+        ]);
+
+        // Target: 1, M, 3. Moving 1 to the front leaves M second and 3 third already.
+        self::assertSame(['1' => '0'], $this->moves(2));
+    }
+
+    public function testMediaAdoptedWithoutPruningIsNotPrunedLaterUnlessASyncNamedIt(): void
+    {
+        // Sync 1, no prune, on a product with no map: both alts are adopted.
+        $nodes  = [['id' => 'gid://shopify/MediaImage/1', 'alt' => 'S_1.jpg'], ['id' => 'gid://shopify/MediaImage/7', 'alt' => 'Lifestyle shot']];
+        $client = $this->mockClient([self::media($nodes), self::replaced(), self::saved()]);
+
+        $result = $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.test/S_1.jpg')]);
+
+        self::assertSame(['S_1.jpg', 'Lifestyle shot'], $result['adopted']);
+        $saved = json_decode($this->body(2)['variables']['metafields'][0]['value'], true);
+        self::assertSame('["Lifestyle shot"]', $saved[MediaKeyStore::ADOPTED_KEY]); // S_1.jpg was named: confirmed
+
+        // Sync 2 with prune: the merchant's image was only ever a guess, so it stays.
+        $client = $this->mockClient([self::media($nodes, $saved, owner: null), self::replaced()]);
+
+        $result = $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.test/S_1.jpg')], prune: true);
+
+        self::assertSame([], $result['pruned']);
+        self::assertCount(2, $this->history); // read + replace: no detach, and the map is unchanged
+    }
+
+    public function testAnAdoptedKeyIsPrunableOnceASyncHasNamedIt(): void
+    {
+        $nodes = [['id' => 'gid://shopify/MediaImage/1', 'alt' => 'S_1.jpg'], ['id' => 'gid://shopify/MediaImage/2', 'alt' => 'S_2.jpg']];
+        $map   = [
+            'S_1.jpg'                  => 'gid://shopify/MediaImage/1',
+            'S_2.jpg'                  => 'gid://shopify/MediaImage/2',
+            MediaKeyStore::ADOPTED_KEY => '["S_2.jpg"]',
+        ];
+
+        // S_2.jpg is named here, which confirms it...
+        $client = $this->mockClient([self::media($nodes, $map), self::replaced(), self::saved()]);
+        $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.test/S_1.jpg'), MediaEntry::url(2, 'https://cdn.test/S_2.jpg')]);
+        self::assertSame(['S_1.jpg' => 'gid://shopify/MediaImage/1', 'S_2.jpg' => 'gid://shopify/MediaImage/2'], $this->savedMap(2));
+
+        // ...so a later mirror sync without it removes it.
+        unset($map[MediaKeyStore::ADOPTED_KEY]);
+        $client = $this->mockClient([
+            self::media($nodes, $map),
+            self::replaced(),
+            new Response(200, [], (string) json_encode(['data' => ['fileUpdate' => ['files' => [['id' => 'gid://shopify/MediaImage/2']], 'userErrors' => []]]])),
+            self::saved(),
+        ]);
+        $result = $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.test/S_1.jpg')], prune: true);
+
+        self::assertSame(['gid://shopify/MediaImage/2'], $result['pruned']);
+    }
+
+    public function testReservedKeysAreRejectedAsSlotKeys(): void
+    {
+        $client = $this->mockClient([]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('reserved');
+
+        $client->products()->syncMedia('55', [MediaEntry::url(1, 'https://cdn.test/a.jpg', key: MediaKeyStore::ADOPTED_KEY)]);
     }
 
     public function testEnsureMediaSkipsByMapAndRecordsWhatItAdds(): void

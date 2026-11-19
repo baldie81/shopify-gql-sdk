@@ -84,6 +84,23 @@ final class ClientTest extends TestCase
         }
     }
 
+    public function testDataReturnedAlongsideErrorsIsKeptOnTheException(): void
+    {
+        // What Shopify sends for a field the app isn't approved to read.
+        $client = $this->client([new Response(200, [], (string) json_encode([
+            'data'   => ['customer' => ['id' => 'gid://shopify/Customer/1', 'defaultPhoneNumber' => null]],
+            'errors' => [['message' => 'This app is not approved to use the phoneNumber field.', 'path' => ['customer', 'defaultPhoneNumber', 'phoneNumber']]],
+        ]))]);
+
+        try {
+            $client->execute('query{...}');
+            self::fail('expected GraphQLException');
+        } catch (GraphQLException $e) {
+            self::assertSame('gid://shopify/Customer/1', $e->data['customer']['id'] ?? null);
+            self::assertCount(1, $e->errors);
+        }
+    }
+
     public function testThrottledRetriesWithBackoffThenSucceeds(): void
     {
         $client = $this->client([

@@ -68,10 +68,20 @@ final class MediaEntry
         return $this->alt;
     }
 
+    /**
+     * The source's filename. A URL whose last path segment isn't a filename
+     * (no extension) is told apart by its query string, so
+     * `…/watch?v=AAA` and `…/watch?v=BBB` don't share the key `watch`.
+     */
     private static function deriveKey(string $url): string
     {
         $base = basename((string) (parse_url($url, PHP_URL_PATH) ?? $url));
+        if ($base === '') {
+            return $url;
+        }
 
-        return $base !== '' ? $base : $url;
+        $query = (string) (parse_url($url, PHP_URL_QUERY) ?? '');
+
+        return $query !== '' && !str_contains($base, '.') ? "{$base}?{$query}" : $base;
     }
 }

@@ -28,6 +28,9 @@ use Baldie81\ShopifyGraphQL\GraphQL\Client;
  */
 final class BulkOperations extends AbstractResource
 {
+    /** Longest result line accepted; a file without line breaks is not buffered without end. */
+    private const int MAX_LINE_BYTES = 64 * 1024 * 1024;
+
     private const string FIELDS = 'id status errorCode createdAt completedAt objectCount fileSize url partialDataUrl';
 
     /** @var callable(int):void */
@@ -71,7 +74,7 @@ final class BulkOperations extends AbstractResource
         try {
             $response = $this->downloader->request('GET', $url, ['stream' => true]);
         } catch (\Throwable $e) {
-            throw new TransportException('Failed to download bulk result: ' . $e->getMessage(), 0, $e);
+            throw new TransportException('Failed to download bulk result: ' . self::withoutUrlQueries($e->getMessage()), 0, $e);
         }
 
         // An injected client may have `http_errors` off, so check the status too.
@@ -90,7 +93,10 @@ final class BulkOperations extends AbstractResource
                 $buffer .= $body->read(65536);
             } catch (\RuntimeException $e) {
                 // The connection dropped mid-download: rows already yielded are incomplete.
-                throw new TransportException('Bulk result download was interrupted: ' . $e->getMessage(), 0, $e);
+                throw new TransportException('Bulk result download was interrupted: ' . self::withoutUrlQueries($e->getMessage()), 0, $e);
+            }
+            if (strlen($buffer) > self::MAX_LINE_BYTES && !str_contains($buffer, "\n")) {
+                throw new TransportException('Bulk result has a line longer than ' . self::MAX_LINE_BYTES . ' bytes; this is not a JSONL result file.');
             }
             while (($newline = strpos($buffer, "\n")) !== false) {
                 $line   = trim(substr($buffer, 0, $newline));

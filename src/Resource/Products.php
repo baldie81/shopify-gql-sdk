@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Baldie81\ShopifyGraphQL\Resource;
 
 use Baldie81\ShopifyGraphQL\Exception\MediaKeyStoreException;
+use Baldie81\ShopifyGraphQL\Exception\ShopifyException;
 use Baldie81\ShopifyGraphQL\GraphQL\Client;
 use Baldie81\ShopifyGraphQL\MediaKeys\ChainMediaKeyStore;
 use Baldie81\ShopifyGraphQL\MediaKeys\MediaKeyStore;
@@ -220,6 +221,9 @@ final class Products extends AbstractResource
      * can't ride in the create/update mutation itself, so this is the
      * second hop — done for you so a localized create reads as one call.
      *
+     * If that second hop fails, the product has still been saved: it is returned
+     * as usual, with a `TRANSLATIONS_FAILED` entry in `userErrors`.
+     *
      * @param ProductInput|array<string,mixed> $input
      * @param array<string,mixed>              $result
      * @return array<string,mixed>
@@ -246,7 +250,19 @@ final class Products extends AbstractResource
             return $result;
         }
 
-        $result['translations'] = $this->setTranslations((string) $productId, $fields);
+        // The product is saved by now: a failure here must still hand back its
+        // id, or the caller would retry the create and end up with a duplicate.
+        try {
+            $result['translations'] = $this->setTranslations((string) $productId, $fields);
+        } catch (ShopifyException $e) {
+            $error = [
+                'field'   => null,
+                'message' => 'The product was saved, but its translations were not: ' . $e->getMessage(),
+                'code'    => 'TRANSLATIONS_FAILED',
+            ];
+            $result['translations'] = ['translations' => [], 'userErrors' => [$error], 'digests' => [], 'skipped' => []];
+            $result['userErrors'][] = $error;
+        }
 
         return $result;
     }
@@ -365,14 +381,10 @@ final class Products extends AbstractResource
      */
     public function ensureMedia(string $id, array $media): array
     {
-        $gid   = Gid::product($id);
-        $state = $this->resolveMediaKeys($gid);
-        $known = $state['known'];
+        $gid = Gid::product($id);
 
-        $toAdd   = [];
-        $addKeys = [];
-        $skipped = [];
-        $seen    = [];
+        $items = [];
+        $keys  = [];
         foreach ($media as $item) {
             if ($item instanceof Media) {
                 $key     = $item->key();
@@ -384,6 +396,22 @@ final class Products extends AbstractResource
                 unset($payload['key']);
             }
 
+            if ($key !== '') {
+                $keys[$key] = true;
+            }
+            $items[] = [$key, $payload];
+        }
+
+        $state = $this->resolveMediaKeys($gid);
+        $known = $state['known'];
+        // A key named here is confirmed as ours, whatever way it was first matched.
+        $unconfirmed = array_values(array_diff($state['unconfirmed'], array_map('strval', array_keys($keys))));
+
+        $toAdd   = [];
+        $addKeys = [];
+        $skipped = [];
+        $seen    = [];
+        foreach ($items as [$key, $payload]) {
             if ($key !== '' && (isset($known[$key]) || isset($seen[$key]))) {
                 $skipped[] = $key;
                 continue;
@@ -408,7 +436,7 @@ final class Products extends AbstractResource
                         $known[$addKeys[$index]] = $mediaId;
                     }
                 }
-                $this->saveMediaKeysQuietly($gid, $known, $state['loaded']);
+                $this->saveMediaKeysQuietly($gid, $known, $state['loaded'], $unconfirmed);
 
                 throw $e;
             }
@@ -422,7 +450,7 @@ final class Products extends AbstractResource
             }
         }
 
-        $error = $this->saveMediaKeys($gid, $known, $state['loaded']);
+        $error = $this->saveMediaKeys($gid, $known, $state['loaded'], $unconfirmed);
         if ($error !== null) {
             $result['keyStoreSaved']     = false;
             $result['mediaUserErrors'][] = $error;
@@ -450,7 +478,12 @@ final class Products extends AbstractResource
      * is never adopted from, even when every entry in it has gone stale, so
      * images added outside the SDK stay untracked.
      *
-     * @return array{ids:list<string>,known:array<string,string>,adopted:list<string>,loaded:list<array<string,string>|null>}
+     * Adoption is a guess: any image with alt text is taken, the merchant's own
+     * included. Adopted keys are therefore remembered as *unconfirmed* (the
+     * {@see MediaKeyStore::ADOPTED_KEY} entry) until a sync names them, and
+     * {@see syncMedia()} doesn't prune an unconfirmed key on later runs.
+     *
+     * @return array{ids:list<string>,known:array<string,string>,adopted:list<string>,unconfirmed:list<string>,loaded:list<array<string,string>|null>}
      * @throws MediaKeyStoreException when none of the stores can be read
      */
     private function resolveMediaKeys(string $gid): array
@@ -492,8 +525,10 @@ final class Products extends AbstractResource
         }
         $onProduct = array_flip($ids);
 
-        $known = [];
-        $owned = false; // does any store hold a map written for this very product?
+        $reserved    = [MediaKeyStore::OWNER_KEY, MediaKeyStore::ADOPTED_KEY];
+        $known       = [];
+        $unconfirmed = null;
+        $owned       = false; // does any store hold a map written for this very product?
         foreach ($loaded as $map) {
             $owner = $map[MediaKeyStore::OWNER_KEY] ?? null;
             if ($owner !== null && $owner !== $gid) {
@@ -501,25 +536,32 @@ final class Products extends AbstractResource
             }
             $owned = $owned || $owner === $gid;
 
+            if ($unconfirmed === null && isset($map[MediaKeyStore::ADOPTED_KEY])) {
+                $list        = json_decode($map[MediaKeyStore::ADOPTED_KEY], true);
+                $unconfirmed = is_array($list) ? array_map('strval', array_filter($list, 'is_scalar')) : null;
+            }
+
             foreach ($map ?? [] as $key => $mediaId) {
-                if ((string) $key !== MediaKeyStore::OWNER_KEY && isset($onProduct[$mediaId]) && !isset($known[$key])) {
+                if (!in_array((string) $key, $reserved, true) && isset($onProduct[$mediaId]) && !isset($known[$key])) {
                     $known[(string) $key] = $mediaId;
                 }
             }
         }
+        $unconfirmed = array_values(array_filter($unconfirmed ?? [], static fn (string $key): bool => isset($known[$key])));
 
         $adopted = [];
         if ($known === [] && !$owned) {
             foreach ($nodes as $node) {
                 $alt = $node['alt'] ?? null;
-                if (is_string($alt) && $alt !== '' && $alt !== MediaKeyStore::OWNER_KEY && isset($node['id']) && !isset($known[$alt])) {
+                if (is_string($alt) && $alt !== '' && !in_array($alt, $reserved, true) && isset($node['id']) && !isset($known[$alt])) {
                     $known[$alt] = (string) $node['id'];
                     $adopted[]   = $alt;
                 }
             }
+            $unconfirmed = $adopted;
         }
 
-        return ['ids' => $ids, 'known' => $known, 'adopted' => $adopted, 'loaded' => $loaded];
+        return ['ids' => $ids, 'known' => $known, 'adopted' => $adopted, 'unconfirmed' => $unconfirmed, 'loaded' => $loaded];
     }
 
     /**
@@ -529,11 +571,18 @@ final class Products extends AbstractResource
      * itself has already been changed by then, so this is reported, not thrown.
      *
      * @param array<string,string>             $map
-     * @param list<array<string,string>|null>  $loaded what each store returned when read
+     * @param list<array<string,string>|null>  $loaded      what each store returned when read
+     * @param list<string>                     $unconfirmed keys adopted by alt text that no sync has named yet
      * @return array{field:null,message:string,code:string}|null
      */
-    private function saveMediaKeys(string $gid, array $map, array $loaded): ?array
+    private function saveMediaKeys(string $gid, array $map, array $loaded, array $unconfirmed = []): ?array
     {
+        unset($map[MediaKeyStore::ADOPTED_KEY]);
+        $unconfirmed = array_values(array_filter($unconfirmed, static fn (string $key): bool => isset($map[$key])));
+        if ($unconfirmed !== []) {
+            sort($unconfirmed, SORT_STRING);
+            $map[MediaKeyStore::ADOPTED_KEY] = (string) json_encode($unconfirmed, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
         $map[MediaKeyStore::OWNER_KEY] = $gid;
         ksort($map, SORT_STRING); // numeric keys ("123") are ints in PHP: compare all as strings
 
@@ -565,11 +614,12 @@ final class Products extends AbstractResource
      *
      * @param array<string,string>             $map
      * @param list<array<string,string>|null>  $loaded
+     * @param list<string>                     $unconfirmed
      */
-    private function saveMediaKeysQuietly(string $gid, array $map, array $loaded): void
+    private function saveMediaKeysQuietly(string $gid, array $map, array $loaded, array $unconfirmed = []): void
     {
         try {
-            $this->saveMediaKeys($gid, $map, $loaded);
+            $this->saveMediaKeys($gid, $map, $loaded, $unconfirmed);
         } catch (\Throwable) {
             // a store that throws something of its own must not mask the original failure
         }
@@ -612,8 +662,10 @@ final class Products extends AbstractResource
             }
 
             $pageInfo = $page['media']['pageInfo'] ?? [];
+            $previous = $after;
             $after    = $pageInfo['endCursor'] ?? null;
-        } while (($pageInfo['hasNextPage'] ?? false) && $after !== null);
+            // A cursor that doesn't advance would otherwise loop for ever.
+        } while (($pageInfo['hasNextPage'] ?? false) && $after !== null && $after !== $previous);
 
         return [$nodes, $product];
     }
@@ -755,13 +807,50 @@ final class Products extends AbstractResource
             $moves[] = ['id' => $mediaId, 'newPosition' => (string) $index];
         }
 
+        return $this->moveMedia(Gid::product($id), $moves);
+    }
+
+    /**
+     * @param list<array{id:string,newPosition:string}> $moves applied by Shopify in the order given
+     * @return array{job:?array<string,mixed>,mediaUserErrors:list<array<string,mixed>>}
+     */
+    private function moveMedia(string $gid, array $moves): array
+    {
         $mutation = 'mutation ($id: ID!, $moves: [MoveInput!]!) {'
             . ' productReorderMedia(id: $id, moves: $moves) {'
             . ' job { id done } mediaUserErrors { field message } } }';
 
-        $data = $this->gql->execute($mutation, ['id' => Gid::product($id), 'moves' => $moves]);
+        $data = $this->gql->execute($mutation, ['id' => $gid, 'moves' => $moves]);
 
         return $data['productReorderMedia'] ?? ['job' => null, 'mediaUserErrors' => []];
+    }
+
+    /**
+     * The product's media order once every slot's media sits at its slot
+     * position (1 = first): the rest keep their order and fill the gaps. A
+     * position past the end, or one already taken, means "the next free place".
+     *
+     * @param list<string>       $current   media ids as they are on the product
+     * @param array<string,int>  $positions media id => 1-based slot position, in ascending position order
+     * @return list<string>
+     */
+    private static function arrangeMedia(array $current, array $positions): array
+    {
+        $onProduct = array_flip($current);
+        $slotted   = array_values(array_filter(array_keys($positions), static fn (string $id): bool => isset($onProduct[$id])));
+        $others    = array_values(array_filter($current, static fn (string $id): bool => !isset($positions[$id])));
+
+        $arranged = [];
+        for ($index = 0, $total = count($current); $index < $total; $index++) {
+            $next = $slotted[0] ?? null;
+            if ($next !== null && ($positions[$next] - 1 <= $index || $others === [])) {
+                $arranged[] = array_shift($slotted);
+            } else {
+                $arranged[] = array_shift($others);
+            }
+        }
+
+        return $arranged;
     }
 
     /**
@@ -803,8 +892,11 @@ final class Products extends AbstractResource
      * Synchronise a product's images to the given ordered slots, idempotently:
      * for each slot, upload the local file (or use its URL), then **replace** the
      * existing media if the slot's key is already on the product — so a re-sync
-     * never creates duplicate files — otherwise create it. Finally, reorder all
-     * touched media to the slots' positions (slot position 1 = main).
+     * never creates duplicate files — otherwise create it. Finally, each slot's
+     * media is moved to its slot position among everything on the product
+     * (position 1 = main image): syncing only `_2` and `_3` leaves the image in
+     * first place where it is. Media no slot names keeps its relative order and
+     * fills the remaining places.
      *
      * This matches the "FTP folder of `SKU_1`, `SKU_2`, …" workflow: pair it with
      * {@see \Baldie81\ShopifyGraphQL\Support\MediaFolder::scan()} and
@@ -823,6 +915,8 @@ final class Products extends AbstractResource
      * isn't in `$slots` is removed from the product, so the product ends up with
      * exactly the supplied set. Untracked media is left untouched — except on a
      * product's very first sync, where media adopted by alt text counts as tracked.
+     * Media adopted on an earlier, non-pruning sync is only pruned once a sync has
+     * named its key: until then it may just as well be an image of the merchant's.
      *
      * A replace Shopify rejects is reported in `userErrors`; that key is left
      * out of `replaced` and its `media` entry has the action `unchanged`.
@@ -852,11 +946,19 @@ final class Products extends AbstractResource
         if ($duplicates !== []) {
             throw new \InvalidArgumentException('Each media slot needs its own key; used more than once: ' . implode(', ', $duplicates) . '.');
         }
+        foreach ([MediaKeyStore::OWNER_KEY, MediaKeyStore::ADOPTED_KEY] as $reservedKey) {
+            if (isset($counts[$reservedKey])) {
+                throw new \InvalidArgumentException("\"{$reservedKey}\" is reserved and can't be used as a media slot key.");
+            }
+        }
 
         // Read first: if the key stores are unreadable we stop before uploading.
         $state    = $this->resolveMediaKeys($gid);
         $existing = $state['known'];
         $knownIds = $state['ids'];
+        // Naming a key confirms it as ours; the rest of what was adopted by alt
+        // text stays a guess, and a guess is never pruned on a later run.
+        $unconfirmed = array_values(array_diff($state['unconfirmed'], array_map('strval', array_keys($counts))));
 
         usort($slots, static fn (MediaEntry $a, MediaEntry $b): int => $a->position() <=> $b->position());
 
@@ -935,22 +1037,41 @@ final class Products extends AbstractResource
                 }
             }
 
-            // Final order, in slot position order, using the (now-known) media ids.
             // `media` pairs each slot key with its media id and the action taken, so
             // the caller can persist the gid per slot.
             $orderedIds = [];
             $media      = [];
+            $positions  = []; // media id => slot position, ascending
             foreach ($slots as $slot) {
                 $key = $slot->key();
                 if (isset($existing[$key])) {
-                    $orderedIds[] = $existing[$key];
-                    $media[]      = ['key' => $key, 'id' => $existing[$key], 'action' => $action[$key] ?? 'unchanged'];
+                    $orderedIds[]               = $existing[$key];
+                    $media[]                    = ['key' => $key, 'id' => $existing[$key], 'action' => $action[$key] ?? 'unchanged'];
+                    $positions[$existing[$key]] = $slot->position();
+                }
+            }
+
+            // Put each slot's media at its position among everything on the
+            // product (new media is appended by Shopify). Shopify applies moves
+            // one after the other, so they are worked out the same way: walk the
+            // target order and move whatever isn't in its place yet.
+            $current = $knownIds;
+            foreach ($createdNodes as $node) {
+                $current[] = (string) $node['id'];
+            }
+
+            $moves = [];
+            foreach (self::arrangeMedia($current, $positions) as $index => $mediaId) {
+                if ($current[$index] !== $mediaId) {
+                    $current = array_values(array_diff($current, [$mediaId]));
+                    array_splice($current, $index, 0, [$mediaId]);
+                    $moves[] = ['id' => $mediaId, 'newPosition' => (string) $index];
                 }
             }
 
             $reorder = ['job' => null, 'mediaUserErrors' => []];
-            if (count($orderedIds) > 1) {
-                $reorder = $this->reorderMedia($gid, $orderedIds);
+            if ($moves !== []) {
+                $reorder = $this->moveMedia($gid, $moves);
                 foreach ($reorder['mediaUserErrors'] ?? [] as $error) {
                     $userErrors[] = $error;
                 }
@@ -963,9 +1084,13 @@ final class Products extends AbstractResource
                 foreach ($slots as $slot) {
                     $incoming[$slot->key()] = true;
                 }
+                // Keys adopted in an earlier run and never named since are only a
+                // guess at what is ours: left alone. (Adopted in this very run,
+                // they are pruned — the documented first-sync mirror.)
+                $guesses   = array_flip(array_diff($unconfirmed, $state['adopted']));
                 $orphanIds = [];
                 foreach ($existing as $key => $mediaId) {
-                    if (!isset($incoming[$key])) {
+                    if (!isset($incoming[$key]) && !isset($guesses[(string) $key])) {
                         $orphanIds[] = $mediaId;
                     }
                 }
@@ -981,14 +1106,14 @@ final class Products extends AbstractResource
             foreach (self::pairCreated($createInputs, $createdNodes) as $index => $mediaId) {
                 $existing[$createKeys[$index]] = $mediaId;
             }
-            $this->saveMediaKeysQuietly($gid, $existing, $state['loaded']);
+            $this->saveMediaKeysQuietly($gid, $existing, $state['loaded'], $unconfirmed);
 
             throw $e;
         }
 
         // Remember what is on the product now (minus anything just removed).
         $map   = array_diff($existing, $pruned);
-        $error = $this->saveMediaKeys($gid, $map, $state['loaded']);
+        $error = $this->saveMediaKeys($gid, $map, $state['loaded'], $unconfirmed);
         if ($error !== null) {
             $userErrors[] = $error;
         }
@@ -999,7 +1124,7 @@ final class Products extends AbstractResource
             'replaced'      => $replaced,           // keys replaced
             'pruned'        => $pruned,             // media gids removed (prune mode)
             'adopted'       => $state['adopted'],   // keys matched by alt text (one-time migration)
-            'orderedIds'    => $orderedIds,         // media gids in final order
+            'orderedIds'    => $orderedIds,         // the slots' media gids, in slot order
             'reorder'       => $reorder,            // { job: { id, done }, mediaUserErrors }
             'keyStoreSaved' => $error === null,     // false: the key map could not be written
             'userErrors'    => $userErrors,         // aggregated, for logging
